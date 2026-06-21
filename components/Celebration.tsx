@@ -1,29 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Place } from "@/lib/types";
+import type { Goal } from "@/lib/types";
 
 interface Props {
-  place: Place | null;
+  goal: Goal | null;
   reduced: boolean;
   onView: () => void;
   onClose: () => void;
 }
 
-export default function Celebration({ place, reduced, onView, onClose }: Props) {
+export default function Celebration({ goal, reduced, onView, onClose }: Props) {
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!place?.photo) {
+    if (!goal?.photo) {
       setUrl(null);
       return;
     }
-    const u = URL.createObjectURL(place.photo);
+    const u = URL.createObjectURL(goal.photo);
     setUrl(u);
     return () => URL.revokeObjectURL(u);
-  }, [place?.photo]);
+  }, [goal?.photo]);
 
-  if (!place) return null;
+  if (!goal) return null;
 
   return (
     <div className="absolute inset-0 z-50 grid place-items-center bg-ink/80 backdrop-blur-sm">
@@ -45,14 +45,14 @@ export default function Celebration({ place, reduced, onView, onClose }: Props) 
           <div className="relative h-32 w-32 rotate-[-4deg] overflow-hidden rounded-2xl border-4 border-parchment-light bg-parchment shadow-marker">
             {url ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={url} alt={place.title} className="h-full w-full object-cover" />
+              <img src={url} alt={goal.title} className="h-full w-full object-cover" />
             ) : (
               <span className="grid h-full w-full place-items-center text-2xl">✦</span>
             )}
           </div>
         </div>
 
-        <p className="mt-8 font-hand text-2xl text-parchment-light">{place.title}</p>
+        <p className="mt-8 font-hand text-2xl text-parchment-light">{goal.title}</p>
 
         <button
           onClick={onView}

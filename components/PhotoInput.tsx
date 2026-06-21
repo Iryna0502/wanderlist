@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { compressImage } from "@/lib/image";
+import { compressImage, isHeicFile, isPhotoFile } from "@/lib/image";
 
 interface Props {
   onChange: (blob: Blob | null) => void;
@@ -14,6 +14,7 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState("Processing your photo…");
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,12 +34,15 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
   const handleFile = useCallback(
     async (file: File | undefined) => {
       if (!file) return;
-      if (!file.type.startsWith("image/")) {
+      if (!isPhotoFile(file)) {
         setError("That doesn't look like an image.");
         return;
       }
       setError(null);
       setBusy(true);
+      setBusyLabel(
+        isHeicFile(file) ? "Converting iPhone photo…" : "Processing your photo…",
+      );
       try {
         const blob = await compressImage(file);
         setPreview((old) => {
@@ -65,7 +69,7 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif,image/heic,image/heif"
         capture="environment"
         className="sr-only"
         onChange={(e) => handleFile(e.target.files?.[0])}
@@ -96,7 +100,7 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
           />
         ) : (
           <span className="px-4 text-center text-sm text-ink-soft">
-            {busy ? "Shrinking your photo…" : "Tap to add a photo"}
+            {busy ? busyLabel : "Tap to add a photo"}
             <span className="mt-1 block text-xs text-ink-faint">
               camera or gallery · or drag &amp; drop
             </span>

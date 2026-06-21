@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Companions, Place } from "@/lib/types";
+import type { Companions, Goal } from "@/lib/types";
 import PhotoInput from "./PhotoInput";
 
 interface SubmitData {
@@ -13,20 +13,18 @@ interface SubmitData {
 }
 
 interface Props {
-  place?: Place;
+  goal: Goal;
   onSubmit: (data: SubmitData) => void;
   onCancel: () => void;
 }
 
-export default function ClaimForm({ place, onSubmit, onCancel }: Props) {
-  const editing = !!place;
-  const [title, setTitle] = useState(place?.title ?? "");
-  const [text, setText] = useState(place?.text ?? "");
-  const [location, setLocation] = useState(place?.location ?? "");
-  const [companions, setCompanions] = useState<Companions>(
-    place?.companions ?? "alone",
-  );
-  const [photo, setPhoto] = useState<Blob | null>(place?.photo ?? null);
+/** Edit an unlocked goal's story, photo, and details. */
+export default function EditGoalForm({ goal, onSubmit, onCancel }: Props) {
+  const [title, setTitle] = useState(goal.title);
+  const [text, setText] = useState(goal.text);
+  const [location, setLocation] = useState(goal.location ?? "");
+  const [companions, setCompanions] = useState<Companions>(goal.companions);
+  const [photo, setPhoto] = useState<Blob | null>(goal.photo);
 
   return (
     <form
@@ -36,17 +34,15 @@ export default function ClaimForm({ place, onSubmit, onCancel }: Props) {
       }}
       className="pb-2"
     >
-      <h2 id={editing ? "edit-title" : "claim-title"} className="font-display text-2xl text-ink">
-        {editing ? "Edit memory" : "What did you do here?"}
+      <h2 id="edit-title" className="font-display text-2xl text-ink">
+        Edit memory
       </h2>
       <p className="mt-1 text-sm text-ink-soft">
-        {editing
-          ? "Update the story of this place on your map."
-          : "A new experience claims a patch of the map. Tell its story."}
+        Update the story of this goal on your map.
       </p>
 
       <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-ink-soft">
-        Give it a title
+        Title
       </label>
       <input
         autoFocus
@@ -101,14 +97,10 @@ export default function ClaimForm({ place, onSubmit, onCancel }: Props) {
       </div>
 
       <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-ink-soft">
-        A photo of the moment
+        Photo
       </label>
       <div className="mt-1">
-        <PhotoInput
-          key={place?.id ?? "new"}
-          initialBlob={place?.photo}
-          onChange={setPhoto}
-        />
+        <PhotoInput key={goal.id} initialBlob={goal.photo} onChange={setPhoto} />
       </div>
 
       <div className="mt-5 flex gap-3">
@@ -123,7 +115,7 @@ export default function ClaimForm({ place, onSubmit, onCancel }: Props) {
           type="submit"
           className="min-h-[48px] flex-[2] rounded-xl bg-primary font-semibold text-parchment-light shadow-marker active:translate-y-px"
         >
-          {editing ? "Save changes" : "✦ Add to map"}
+          Save changes
         </button>
       </div>
     </form>

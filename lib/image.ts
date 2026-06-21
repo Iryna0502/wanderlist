@@ -4,25 +4,47 @@
  */
 const MAX_EDGE = 900;
 const JPEG_QUALITY = 0.82;
+const HEIC_JPEG_QUALITY = 0.9;
 
-function isHeic(file: File): boolean {
-  const type = file.type.toLowerCase();
-  if (type.includes("heic") || type.includes("heif")) return true;
-  const name = file.name.toLowerCase();
-  return name.endsWith(".heic") || name.endsWith(".heif");
+/** Detect HEIC/HEIF by MIME and extension — iPhone files often omit `file.type`. */
+export function isHeicFile(file: File): boolean {
+  const type = file.type;
+  if (/^image\/heic$/i.test(type) || /^image\/heif$/i.test(type)) return true;
+  if (/heic|heif/i.test(type)) return true;
+  return /\.heic$|\.heif$/i.test(file.name);
+}
+
+/** True for normal image MIME types and HEIC picked without a reliable type. */
+export function isPhotoFile(file: File): boolean {
+  if (file.type.startsWith("image/")) return true;
+  return isHeicFile(file);
+}
+
+/** Convert HEIC/HEIF to JPEG on-device; pass through everything else unchanged. */
+export async function convertHeicIfNeeded(file: File): Promise<File | Blob> {
+  if (!isHeicFile(file)) return file;
+
+  try {
+    const { heicTo } = await import("heic-to");
+    return await heicTo({
+      blob: file,
+      type: "image/jpeg",
+      quality: HEIC_JPEG_QUALITY,
+    });
+  } catch {
+    throw new Error(
+      "Не вдалося конвертувати це HEIC-фото. Спробуй експортувати його як JPEG (Перегляд → File → Export).",
+    );
+  }
 }
 
 export async function compressImage(file: File): Promise<Blob> {
   if (file.size === 0) {
     throw new Error("That file looks empty. Try choosing the photo again.");
   }
-  if (isHeic(file)) {
-    throw new Error(
-      "HEIC photos aren't supported in most browsers. Export as JPEG or PNG, or on iPhone choose Settings → Camera → Formats → Most Compatible.",
-    );
-  }
 
-  const bitmap = await loadBitmap(file);
+  const input = await convertHeicIfNeeded(file);
+  const bitmap = await loadBitmap(input);
   const { width, height } = bitmap;
 
   const scale = Math.min(1, MAX_EDGE / Math.max(width, height));
@@ -52,15 +74,15 @@ export async function compressImage(file: File): Promise<Blob> {
   return blob;
 }
 
-async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
+async function loadBitmap(source: Blob): Promise<ImageBitmap | HTMLImageElement> {
   if (typeof createImageBitmap === "function") {
     try {
-      return await createImageBitmap(file);
+      return await createImageBitmap(source);
     } catch {
       /* fall through to <img> decode */
     }
   }
-  const url = URL.createObjectURL(file);
+  const url = URL.createObjectURL(source);
   try {
     const img = new Image();
     img.decoding = "async";

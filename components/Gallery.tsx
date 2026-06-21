@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Place } from "@/lib/types";
+import type { Goal } from "@/lib/types";
 
-function Thumb({ place, onClick }: { place: Place; onClick: () => void }) {
+function Thumb({ goal, onClick }: { goal: Goal; onClick: () => void }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!place.photo) return;
-    const u = URL.createObjectURL(place.photo);
+    if (!goal.photo) return;
+    const u = URL.createObjectURL(goal.photo);
     setUrl(u);
     return () => URL.revokeObjectURL(u);
-  }, [place.photo]);
+  }, [goal.photo]);
 
   return (
     <button
@@ -21,7 +21,7 @@ function Thumb({ place, onClick }: { place: Place; onClick: () => void }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={url}
-          alt={place.title}
+          alt={goal.title}
           className="h-full w-full object-cover transition group-hover:scale-105"
         />
       ) : (
@@ -30,7 +30,7 @@ function Thumb({ place, onClick }: { place: Place; onClick: () => void }) {
         </span>
       )}
       <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-ink/80 to-transparent px-2 pb-1.5 pt-6 text-left text-xs font-semibold text-parchment-light">
-        {place.title}
+        {goal.title}
       </span>
     </button>
   );
@@ -38,14 +38,14 @@ function Thumb({ place, onClick }: { place: Place; onClick: () => void }) {
 
 interface Props {
   open: boolean;
-  places: Place[];
+  goals: Goal[];
   onClose: () => void;
-  onSelect: (place: Place) => void;
+  onSelect: (goal: Goal) => void;
 }
 
-export default function Gallery({ open, places, onClose, onSelect }: Props) {
+export default function Gallery({ open, goals, onClose, onSelect }: Props) {
   if (!open) return null;
-  const ordered = [...places].sort((a, b) => b.order - a.order);
+  const ordered = [...goals].sort((a, b) => b.order - a.order);
 
   return (
     <div className="absolute inset-0 z-40">
@@ -65,12 +65,12 @@ export default function Gallery({ open, places, onClose, onSelect }: Props) {
         </div>
         {ordered.length === 0 ? (
           <p className="py-10 text-center text-sm text-ink-faint">
-            No memories yet. Tap a locked spot on the map to add one.
+            No memories yet. Complete a locked goal with a photo to unlock it.
           </p>
         ) : (
           <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4">
-            {ordered.map((p) => (
-              <Thumb key={p.id} place={p} onClick={() => onSelect(p)} />
+            {ordered.map((g) => (
+              <Thumb key={g.id} goal={g} onClick={() => onSelect(g)} />
             ))}
           </div>
         )}

@@ -1,31 +1,34 @@
-import type { Bounds, Place, FogSpot, WorldState } from "./types";
+import type { Bounds, Goal, WorldState } from "./types";
 
 const DEFAULT_BOUNDS: Bounds = { w: 1200, h: 1600 };
+export const SCHEMA_VERSION = 3;
 
 /**
- * Persistence layer — IndexedDB, ZERO backend.
- *
- * Why IndexedDB over localStorage: localStorage is capped near ~5MB and only
- * stores strings, so photos must be base64 (≈ +33% size) — a few snapshots and
- * you're full. IndexedDB stores photo Blobs natively with far larger quota, so
- * the map of a life can keep growing. Tradeoff: the API is async, wrapped below.
- *
- * Layout: one "places" store (photo Blob lives on each record) + one "meta"
- * store holding fog spots and the order counter.
+ * Persistence — IndexedDB, on-device only.
+ * Store "places" holds Goal records (name kept for upgrade compatibility).
  */
 const DB_NAME = "wanderlist";
-const DB_VERSION = 1;
-const PLACES = "places";
+const DB_VERSION = 2;
+const GOALS = "places";
 const META = "meta";
 const META_KEY = "world";
+
+interface StoredMeta {
+  nextOrder: number;
+  bounds?: Bounds;
+  mapLayoutVersion?: number;
+  schemaVersion?: number;
+  /** @deprecated v1 — discarded on migration */
+  fog?: unknown[];
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(PLACES)) {
-        db.createObjectStore(PLACES, { keyPath: "id" });
+      if (!db.objectStoreNames.contains(GOALS)) {
+        db.createObjectStore(GOALS, { keyPath: "id" });
       }
       if (!db.objectStoreNames.contains(META)) {
         db.createObjectStore(META);
@@ -61,51 +64,105 @@ function reqDone<T>(r: IDBRequest<T>): Promise<T> {
   });
 }
 
+/** v1 row shape — migrated to unlocked goals on load. */
+interface LegacyPlace {
+  id: string;
+  x: number;
+  y: number;
+  title: string;
+  text: string;
+  location?: string;
+  companions: Goal["companions"];
+  biome: Goal["biome"];
+  photo: Blob | null;
+  likes?: number;
+  liked?: boolean;
+  order: number;
+  createdAt: number;
+}
+
+/** v1 Place rows → unlocked goals; empty fog meta is dropped. */
+function migrateRecords(records: unknown[], meta: StoredMeta | undefined): WorldState {
+  const goals: Goal[] = [];
+
+  for (const raw of records) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+
+    if (row.status === "locked" || row.status === "unlocked") {
+      goals.push(raw as Goal);
+      continue;
+    }
+
+    const place = raw as LegacyPlace;
+    if (!place.id || !place.title) continue;
+    goals.push({
+      ...place,
+      status: "unlocked",
+      unlockedAt: place.createdAt,
+    });
+  }
+
+  goals.sort((a, b) => a.order - b.order);
+
+  const kept = goals.filter((g) => !/hot air balloon/i.test(g.title));
+
+  return {
+    goals: kept,
+    nextOrder: meta?.nextOrder ?? kept.length,
+    bounds: meta?.bounds ?? DEFAULT_BOUNDS,
+    mapLayoutVersion: meta?.mapLayoutVersion,
+  };
+}
+
 export async function loadWorld(): Promise<WorldState | null> {
   const db = await openDB();
   try {
-    return await tx(db, [PLACES, META], "readonly", async (t) => {
-      const places = (await reqDone(
-        t.objectStore(PLACES).getAll(),
-      )) as Place[];
+    const world = await tx(db, [GOALS, META], "readonly", async (t) => {
+      const records = (await reqDone(t.objectStore(GOALS).getAll())) as unknown[];
       const meta = (await reqDone(
         t.objectStore(META).get(META_KEY),
-      )) as
-        | {
-            fog: FogSpot[];
-            nextOrder: number;
-            bounds?: Bounds;
-            mapLayoutVersion?: number;
-          }
-        | undefined;
-      if (!meta && places.length === 0) return null;
-      places.sort((a, b) => a.order - b.order);
-      return {
-        places,
-        fog: meta?.fog ?? [],
-        nextOrder: meta?.nextOrder ?? places.length,
-        bounds: meta?.bounds ?? DEFAULT_BOUNDS,
-        mapLayoutVersion: meta?.mapLayoutVersion,
-      };
+      )) as StoredMeta | undefined;
+      if (!meta && records.length === 0) return null;
+      return migrateRecords(records, meta);
     });
+
+    if (world && (await needsPersistedMigration(db, world))) {
+      await saveWorld(world);
+    }
+
+    return world;
   } finally {
     db.close();
   }
 }
 
+/** Re-save once after v1→v2 migration so fog is gone from meta. */
+async function needsPersistedMigration(
+  db: IDBDatabase,
+  _world: WorldState,
+): Promise<boolean> {
+  return tx(db, [META], "readonly", async (t) => {
+    const meta = (await reqDone(
+      t.objectStore(META).get(META_KEY),
+    )) as StoredMeta | undefined;
+    return (meta?.schemaVersion ?? 1) < SCHEMA_VERSION || Array.isArray(meta?.fog);
+  });
+}
+
 export async function saveWorld(state: WorldState): Promise<void> {
   const db = await openDB();
   try {
-    await tx(db, [PLACES, META], "readwrite", async (t) => {
-      const placeStore = t.objectStore(PLACES);
-      await reqDone(placeStore.clear());
-      for (const p of state.places) placeStore.put(p);
+    await tx(db, [GOALS, META], "readwrite", async (t) => {
+      const store = t.objectStore(GOALS);
+      await reqDone(store.clear());
+      for (const g of state.goals) store.put(g);
       t.objectStore(META).put(
         {
-          fog: state.fog,
           nextOrder: state.nextOrder,
           bounds: state.bounds,
           mapLayoutVersion: state.mapLayoutVersion,
+          schemaVersion: SCHEMA_VERSION,
         },
         META_KEY,
       );
@@ -115,12 +172,11 @@ export async function saveWorld(state: WorldState): Promise<void> {
   }
 }
 
-/** Wipe everything (used by the "start over" affordance). */
 export async function clearWorld(): Promise<void> {
   const db = await openDB();
   try {
-    await tx(db, [PLACES, META], "readwrite", (t) => {
-      t.objectStore(PLACES).clear();
+    await tx(db, [GOALS, META], "readwrite", (t) => {
+      t.objectStore(GOALS).clear();
       t.objectStore(META).clear();
     });
   } finally {

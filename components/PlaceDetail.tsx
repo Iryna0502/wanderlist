@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { Place } from "@/lib/types";
-import { compressImage } from "@/lib/image";
+import { useEffect, useState } from "react";
+import type { Goal } from "@/lib/types";
 
-const BIOME_LABEL: Record<Place["biome"], string> = {
+const BIOME_LABEL: Record<Goal["biome"], string> = {
   water: "by the water",
   meadow: "in a meadow",
   forest: "deep in forest",
@@ -13,127 +12,50 @@ const BIOME_LABEL: Record<Place["biome"], string> = {
 };
 
 interface Props {
-  place: Place;
+  goal: Goal;
   onEdit?: () => void;
-  onAddPhoto?: (photo: Blob) => void;
-  onRemovePhoto?: () => void;
   onDelete?: () => void;
 }
 
-export default function PlaceDetail({
-  place,
-  onEdit,
-  onAddPhoto,
-  onRemovePhoto,
-  onDelete,
-}: Props) {
+export default function PlaceDetail({ goal, onEdit, onDelete }: Props) {
   const [url, setUrl] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   useEffect(() => {
-    if (!place.photo) {
+    setDeleteOpen(false);
+  }, [goal.id]);
+
+  useEffect(() => {
+    if (!goal.photo) {
       setUrl(null);
       return;
     }
-    const u = URL.createObjectURL(place.photo);
+    const u = URL.createObjectURL(goal.photo);
     setUrl(u);
     return () => URL.revokeObjectURL(u);
-  }, [place.photo]);
+  }, [goal.photo]);
 
-  const date = new Date(place.createdAt).toLocaleDateString(undefined, {
+  const date = new Date(goal.unlockedAt ?? goal.createdAt).toLocaleDateString(undefined, {
     year: "numeric",
     month: "long",
     day: "numeric",
   });
 
-  const confirmRemovePhoto = () => {
-    if (
-      !window.confirm(
-        "Remove this photo? The memory stays on the map without an image.",
-      )
-    )
-      return;
-    onRemovePhoto?.();
-  };
-
-  const confirmDelete = () => {
-    if (
-      !window.confirm(
-        `Delete "${place.title}"? This removes the experience from the map and returns the spot to fog.`,
-      )
-    )
-      return;
+  const handleDelete = () => {
+    setDeleteOpen(false);
     onDelete?.();
-  };
-
-  const handlePhotoFile = async (file: File | undefined) => {
-    if (!file || !onAddPhoto) return;
-    if (!file.type.startsWith("image/")) return;
-    setUploading(true);
-    try {
-      const blob = await compressImage(file);
-      onAddPhoto(blob);
-    } catch {
-      /* ignore — user can retry */
-    } finally {
-      setUploading(false);
-      if (inputRef.current) inputRef.current.value = "";
-    }
   };
 
   return (
     <div className="pb-2">
       {url ? (
-        <div className="relative mb-4">
+        <div className="mb-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={url}
-            alt={place.title}
+            alt={goal.title}
             className="h-56 w-full rounded-2xl border-2 border-ink/10 object-cover"
           />
-          {onRemovePhoto && (
-            <button
-              type="button"
-              onClick={confirmRemovePhoto}
-              className="absolute right-2 top-2 rounded-lg bg-ink/75 px-3 py-1.5 text-xs font-semibold text-parchment-light backdrop-blur active:translate-y-px"
-            >
-              Remove photo
-            </button>
-          )}
-        </div>
-      ) : onAddPhoto ? (
-        <div className="relative mb-4">
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="sr-only"
-            onChange={(e) => handlePhotoFile(e.target.files?.[0])}
-          />
-          <button
-            type="button"
-            disabled={uploading}
-            onClick={() => inputRef.current?.click()}
-            className="flex h-32 w-full flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-ink/15 bg-parchment text-sm text-ink-faint transition hover:border-primary/40 hover:bg-primary/5 active:translate-y-px disabled:opacity-60"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-7 w-7 text-ink-soft"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3" y="5" width="18" height="14" rx="2" />
-              <circle cx="8.5" cy="10" r="1.5" />
-              <path d="M21 16l-5-5-7 7" />
-            </svg>
-            <span>{uploading ? "Adding photo…" : "Tap to add a photo"}</span>
-            <span className="text-xs text-ink-faint">camera or gallery</span>
-          </button>
         </div>
       ) : (
         <div className="mb-4 flex h-32 w-full items-center justify-center rounded-2xl border-2 border-dashed border-ink/15 bg-parchment text-sm text-ink-faint">
@@ -143,22 +65,22 @@ export default function PlaceDetail({
 
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="detail-title" className="font-hand text-3xl leading-tight text-ink">
-          {place.title}
+          {goal.title}
         </h2>
         <span className="shrink-0 rounded-full bg-primary/15 px-3 py-1 text-xs font-semibold text-primary-deep">
-          #{place.order + 1}
+          #{goal.order + 1}
         </span>
       </div>
 
       <p className="mt-1 text-sm text-ink-faint">
         {date}
-        {place.location ? ` · ${place.location}` : ` · ${BIOME_LABEL[place.biome]}`} ·{" "}
-        {place.companions === "alone" ? "on my own" : "with friends"}
+        {goal.location ? ` · ${goal.location}` : ` · ${BIOME_LABEL[goal.biome]}`} ·{" "}
+        {goal.companions === "alone" ? "on my own" : "with friends"}
       </p>
 
-      {place.text && (
+      {goal.text && (
         <p className="mt-4 whitespace-pre-wrap text-base leading-relaxed text-ink">
-          {place.text}
+          {goal.text}
         </p>
       )}
 
@@ -173,7 +95,7 @@ export default function PlaceDetail({
         {onDelete && (
           <button
             type="button"
-            onClick={confirmDelete}
+            onClick={() => setDeleteOpen(true)}
             aria-label="Delete experience"
             className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border-2 border-red-900/20 bg-red-50/80 text-red-900/80 active:translate-y-px"
           >
@@ -191,6 +113,47 @@ export default function PlaceDetail({
           </button>
         )}
       </div>
+
+      {deleteOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+          <button
+            type="button"
+            aria-label="Cancel delete"
+            onClick={() => setDeleteOpen(false)}
+            className="absolute inset-0 bg-ink/50 backdrop-blur-sm"
+          />
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-title"
+            aria-describedby="delete-desc"
+            className="relative w-full max-w-sm animate-fade-in rounded-2xl border-2 border-ink/15 bg-parchment-light p-5 shadow-sheet"
+          >
+            <h3 id="delete-title" className="font-display text-xl text-ink">
+              Delete this memory?
+            </h3>
+            <p id="delete-desc" className="mt-2 text-sm leading-relaxed text-ink-soft">
+              &ldquo;{goal.title}&rdquo; will be removed from the map.
+            </p>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteOpen(false)}
+                className="min-h-[44px] flex-1 rounded-xl border-2 border-ink/15 bg-parchment font-semibold text-ink-soft"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="min-h-[44px] flex-1 rounded-xl bg-red-900/90 font-semibold text-parchment-light active:translate-y-px"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

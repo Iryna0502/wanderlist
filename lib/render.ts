@@ -1,11 +1,11 @@
-import type { Bounds, Camera, FogSpot, Place, Biome } from "./types";
+import type { Bounds, Camera, Goal, Biome } from "./types";
 import { type Viewport, worldToScreen, visibleWorldBounds } from "./camera";
 
-/** How long the claim reveal animation runs (ms). */
+/** How long the unlock reveal animation runs (ms). */
 export const REVEAL_MS = 1400;
 
-/** World units — fog lock hidden when a place sits this close. */
-const FOG_PLACE_GAP = 80;
+const MARKER_FONT =
+  '600 %fpx ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
 
 const BIOME_COLOR: Record<Biome, string> = {
   water: "#4f9bb0",
@@ -104,15 +104,42 @@ function shadowEllipse(
   ctx.fill();
 }
 
-/** The dotted trail — the path of a life, in discovery order. */
+/** Fit text to a max pixel width — works for Cyrillic/Latin mixed strings. */
+function truncateToWidth(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): string {
+  const trimmed = text.trim();
+  if (!trimmed || maxWidth <= 0) return "";
+  if (ctx.measureText(trimmed).width <= maxWidth) return trimmed;
+
+  const ell = "…";
+  if (ctx.measureText(ell).width > maxWidth) return "";
+
+  let lo = 0;
+  let hi = trimmed.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const candidate = trimmed.slice(0, mid) + ell;
+    if (ctx.measureText(candidate).width <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo > 0 ? trimmed.slice(0, lo) + ell : ell;
+}
+
+/** The dotted trail — unlocked goals in discovery order. */
 function drawTrail(
   ctx: CanvasRenderingContext2D,
   cam: Camera,
   vp: Viewport,
-  places: Place[],
+  goals: Goal[],
 ) {
-  if (places.length < 2) return;
-  const ordered = [...places].sort((a, b) => a.order - b.order);
+  const unlocked = goals
+    .filter((g) => g.status === "unlocked")
+    .sort((a, b) => a.order - b.order);
+  if (unlocked.length < 2) return;
+
   ctx.save();
   ctx.strokeStyle = "rgba(255,250,238,0.7)";
   ctx.lineWidth = Math.max(2, 3 * cam.zoom);
@@ -121,8 +148,8 @@ function drawTrail(
   ctx.shadowColor = "rgba(60,45,25,0.3)";
   ctx.shadowBlur = 3;
   ctx.beginPath();
-  ordered.forEach((p, i) => {
-    const s = worldToScreen(p.x, p.y, cam, vp);
+  unlocked.forEach((g, i) => {
+    const s = worldToScreen(g.x, g.y, cam, vp);
     if (i === 0) ctx.moveTo(s.x, s.y);
     else ctx.lineTo(s.x, s.y);
   });
@@ -220,13 +247,12 @@ function flame(
   ctx.fill();
 }
 
-/** A cozy campsite: tent + flickering campfire + biome glyph hovering above. */
+/** A cozy campsite: tent + flickering campfire. */
 function drawCampsite(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   s: number,
-  biome: Biome,
   time: number,
   reduced: boolean,
   reveal: number,
@@ -238,12 +264,6 @@ function drawCampsite(
   ctx.translate(x, y);
 
   shadowEllipse(ctx, 0, s * 0.55, s * 1.1, s * 0.32, 0.22);
-
-  if (reveal > 0.5) {
-    ctx.globalAlpha = Math.min(1, (reveal - 0.5) / 0.5);
-    biomeGlyph(ctx, biome, 0, -s * 1.55, s * 0.34, BIOME_COLOR[biome]);
-    ctx.globalAlpha = 1;
-  }
 
   ctx.save();
   ctx.scale(pop, pop);
@@ -316,10 +336,11 @@ function drawCampsite(
 }
 
 /** Vertical lift of the polaroid above the campsite anchor (screen px). */
-const CAMPSITE_LIFT = 3.75;
-const CARD_LIFT_FRAC = 0.55;
+const CAMPSITE_LIFT = 2.4;
+const CARD_LIFT_FRAC = 0.38;
+const TITLE_BELOW_CARD = 3;
 
-/** Screen-space layout for a place marker (campsite anchor + polaroid above). */
+/** Screen-space layout for an unlocked goal marker. */
 export function placeMarkerLayout(camZoom: number) {
   const cardW = Math.max(58, Math.min(132, 92 * camZoom));
   const cardH = cardW * 0.84;
@@ -329,31 +350,42 @@ export function placeMarkerLayout(camZoom: number) {
   return { cardW, cardH, campS, polaroidOffsetY };
 }
 
-/** A discovered place: campsite on the map + polaroid + label plaque above. */
-function drawPlaceMarker(
+/** Screen-space layout for a locked goal marker (lock + title plaque). */
+export function lockedMarkerLayout(camZoom: number) {
+  const lockW = Math.max(34, Math.min(70, 52 * camZoom));
+  const fs = Math.max(8, lockW * 0.16);
+  const labelH = fs + 8;
+  const labelMaxW = lockW * 2.5;
+  return { lockW, fs, labelH, labelMaxW };
+}
+
+/** Unlocked goal: campsite + polaroid + title plaque. */
+function drawUnlockedMarker(
   ctx: CanvasRenderingContext2D,
   sx: number,
   sy: number,
   w: number,
   campS: number,
-  place: Place,
+  goal: Goal,
   bitmap: ImageBitmap | undefined,
   reveal: number,
   active: boolean,
   time: number,
   reduced: boolean,
+  titleFs: number,
+  titleLabelH: number,
+  titleMaxW: number,
 ) {
   const pop = easeOutBack(Math.min(1, reveal / 0.8));
   const alpha = Math.min(1, reveal * 1.6);
   const cardW = w;
   const cardH = w * 0.84;
   const pad = Math.max(3, w * 0.06);
-  const tilt = tiltFor(place.id);
+  const tilt = tiltFor(goal.id);
   const centerY = sy - campS * CAMPSITE_LIFT - cardH * CARD_LIFT_FRAC * pop;
 
-  drawCampsite(ctx, sx, sy, campS, place.biome, time, reduced, reveal);
+  drawCampsite(ctx, sx, sy, campS, time, reduced, reveal);
 
-  // Golden glow ring on the active / newest place.
   if (active) {
     const pulse = reduced ? 1 : 0.85 + 0.15 * Math.sin(time * 0.004);
     const gr = ctx.createRadialGradient(sx, centerY, w * 0.2, sx, centerY, w * 1.15 * pulse);
@@ -370,7 +402,6 @@ function drawPlaceMarker(
 
   shadowEllipse(ctx, sx, centerY + cardH * 0.5, cardW * 0.42, cardH * 0.16, 0.22 * alpha);
 
-  // The polaroid card (tilted).
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(sx, centerY);
@@ -401,60 +432,52 @@ function drawPlaceMarker(
     g.addColorStop(1, "#a9c0a3");
     ctx.fillStyle = g;
     ctx.fillRect(px, py, pw, ph);
-    biomeGlyph(ctx, place.biome, 0, 0, w * 0.18, "#5b6f4e");
+    biomeGlyph(ctx, goal.biome, 0, 0, w * 0.18, "#5b6f4e");
   }
   ctx.restore();
   ctx.restore();
 
-  // Horizontal label plaque with a coloured biome badge.
   if (reveal > 0.45) {
     const lblAlpha = Math.min(1, (reveal - 0.45) / 0.4);
-    const title = place.title.length > 22 ? place.title.slice(0, 21) + "…" : place.title;
-    const fs = Math.max(9, w * 0.135);
-    const ph2 = fs + 10;
-    const badge = ph2 * 0.42;
+    const padX = titleFs * 0.45;
+
     ctx.save();
     ctx.globalAlpha = alpha * lblAlpha;
-    ctx.font = `600 ${fs}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
+    ctx.font = MARKER_FONT.replace("%f", String(titleFs));
+    const title = truncateToWidth(ctx, goal.title, titleMaxW);
     const tw = ctx.measureText(title).width;
-    const padX = ph2 * 0.42;
-    const gap = ph2 * 0.3;
-    const plaqueW = padX + badge * 2 + gap + tw + padX;
+    const plaqueW = padX + tw + padX;
     const lx = sx - plaqueW / 2;
-    const ly = centerY + cardH * 0.5 * pop + 6;
+    const ly = centerY + cardH * 0.5 * pop + TITLE_BELOW_CARD;
 
     ctx.shadowColor = "rgba(60,45,25,0.28)";
     ctx.shadowBlur = 6;
     ctx.shadowOffsetY = 2;
     ctx.fillStyle = "#fbf6ec";
-    roundRect(ctx, lx, ly, plaqueW, ph2, ph2 / 2);
+    roundRect(ctx, lx, ly, plaqueW, titleLabelH, titleLabelH / 2);
     ctx.fill();
     ctx.shadowColor = "transparent";
 
-    const bx = lx + padX + badge;
-    const by = ly + ph2 / 2;
-    ctx.fillStyle = BIOME_COLOR[place.biome];
-    ctx.beginPath();
-    ctx.arc(bx, by, badge, 0, Math.PI * 2);
-    ctx.fill();
-    biomeGlyph(ctx, place.biome, bx, by, badge * 0.55, "#ffffff");
-
     ctx.fillStyle = "#4a3c28";
-    ctx.textAlign = "left";
+    ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(title, bx + badge + gap, by + 1);
+    ctx.fillText(title, sx, ly + titleLabelH / 2 + 1);
     ctx.restore();
   }
 }
 
-/** An undiscovered spot: a locked "???" plaque sitting under fog. */
+/** Locked goal: lock plaque + title label (pixel-truncated). */
 function drawLockedMarker(
   ctx: CanvasRenderingContext2D,
   sx: number,
   sy: number,
   w: number,
+  fs: number,
+  labelH: number,
+  labelMaxW: number,
   time: number,
   reduced: boolean,
+  title: string,
 ) {
   const bob = reduced ? 0 : Math.sin(time * 0.002 + sx * 0.05) * w * 0.05;
   const y = sy + bob;
@@ -471,7 +494,6 @@ function drawLockedMarker(
   ctx.fill();
   ctx.restore();
 
-  // Lock icon.
   const lockW = s * 0.34;
   const lockH = s * 0.26;
   const lx = sx - lockW / 2;
@@ -485,22 +507,30 @@ function drawLockedMarker(
   roundRect(ctx, lx, ly, lockW, lockH, s * 0.04);
   ctx.fill();
 
-  // "???"
-  ctx.fillStyle = "rgba(243,232,210,0.9)";
-  ctx.font = `700 ${s * 0.2}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.font = MARKER_FONT.replace("%f", String(fs));
+  const label = truncateToWidth(ctx, title, labelMaxW);
+  if (!label) return;
+
+  const tw = ctx.measureText(label).width;
+  const padX = fs * 0.45;
+  const plaqueW = padX + tw + padX;
+  const plaqueX = sx - plaqueW / 2;
+  const plaqueY = y + s * 0.52 + 4;
+
+  ctx.save();
+  ctx.shadowColor = "rgba(60,45,25,0.28)";
+  ctx.shadowBlur = 5;
+  ctx.shadowOffsetY = 2;
+  ctx.fillStyle = "rgba(251,246,236,0.95)";
+  roundRect(ctx, plaqueX, plaqueY, plaqueW, labelH, labelH / 2);
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+
+  ctx.fillStyle = "#4a3c28";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("???", sx, y + s * 0.28);
-}
-
-function fogHiddenByPlace(fog: FogSpot, places: Place[]): boolean {
-  const gap2 = FOG_PLACE_GAP * FOG_PLACE_GAP;
-  for (const p of places) {
-    const dx = p.x - fog.x;
-    const dy = p.y - fog.y;
-    if (dx * dx + dy * dy < gap2) return true;
-  }
-  return false;
+  ctx.fillText(label, sx, plaqueY + labelH / 2 + 1);
+  ctx.restore();
 }
 
 export interface DynamicInput {
@@ -508,57 +538,67 @@ export interface DynamicInput {
   vp: Viewport;
   time: number;
   now: number;
-  places: Place[];
-  fog: FogSpot[];
+  goals: Goal[];
   photos: Map<string, ImageBitmap>;
   activeId?: string;
   reduced: boolean;
 }
 
 /**
- * The cheap per-frame marker layer drawn on top of the static map image:
- * the discovery trail, polaroid place markers, and locked fog plaques.
+ * Marker layer on top of the static map: trail + locked/unlocked goal markers.
  */
 export function drawDynamic(ctx: CanvasRenderingContext2D, input: DynamicInput) {
-  const { cam, vp, time, now, places, fog, photos, activeId, reduced } = input;
+  const { cam, vp, time, now, goals, photos, activeId, reduced } = input;
 
-  drawTrail(ctx, cam, vp, places);
+  drawTrail(ctx, cam, vp, goals);
 
   const { cardW, campS } = placeMarkerLayout(cam.zoom);
+  const { lockW, fs, labelH, labelMaxW } = lockedMarkerLayout(cam.zoom);
 
-  // Locked fog first (so markers overlap them).
-  const lockW = Math.max(34, Math.min(70, 52 * cam.zoom));
-  for (const f of fog) {
-    if (fogHiddenByPlace(f, places)) continue;
-    const s = worldToScreen(f.x, f.y, cam, vp);
-    if (s.x < -120 || s.x > vp.width + 120 || s.y < -120 || s.y > vp.height + 120)
-      continue;
-    drawLockedMarker(ctx, s.x, s.y, lockW, time, reduced);
-  }
-
-  // Place markers, painter-sorted by y so lower ones overlap upper ones.
-  const ordered = [...places].sort(
+  const ordered = [...goals].sort(
     (a, b) =>
       worldToScreen(a.x, a.y, cam, vp).y - worldToScreen(b.x, b.y, cam, vp).y,
   );
-  for (const p of ordered) {
-    const s = worldToScreen(p.x, p.y, cam, vp);
+
+  for (const g of ordered) {
+    const s = worldToScreen(g.x, g.y, cam, vp);
     if (s.x < -160 || s.x > vp.width + 160 || s.y < -160 || s.y > vp.height + 160)
       continue;
-    const age = now - p.createdAt;
+
+    if (g.status === "locked") {
+      drawLockedMarker(
+        ctx,
+        s.x,
+        s.y,
+        lockW,
+        fs,
+        labelH,
+        labelMaxW,
+        time,
+        reduced,
+        g.title,
+      );
+      continue;
+    }
+
+    const unlockTime = g.unlockedAt ?? g.createdAt;
+    const age = now - unlockTime;
     const reveal = age >= REVEAL_MS ? 1 : Math.max(0, age / REVEAL_MS);
-    drawPlaceMarker(
+    drawUnlockedMarker(
       ctx,
       s.x,
       s.y,
       cardW,
       campS,
-      p,
-      photos.get(p.id),
+      g,
+      photos.get(g.id),
       reveal,
-      p.id === activeId,
+      g.id === activeId,
       time,
       reduced,
+      fs,
+      labelH,
+      labelMaxW,
     );
   }
 }

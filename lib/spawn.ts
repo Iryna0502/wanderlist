@@ -1,4 +1,4 @@
-import type { Bounds, FogSpot, Place } from "./types";
+import type { Bounds, Goal } from "./types";
 import { biomeAt } from "./biome";
 import { rng } from "./noise";
 
@@ -16,19 +16,13 @@ const NEAR_MAX = 520;
 function farEnough(
   x: number,
   y: number,
-  places: Place[],
-  fog: FogSpot[],
+  goals: Goal[],
   gap = MIN_GAP,
 ): boolean {
   const g2 = gap * gap;
-  for (const p of places) {
-    const dx = p.x - x;
-    const dy = p.y - y;
-    if (dx * dx + dy * dy < g2) return false;
-  }
-  for (const f of fog) {
-    const dx = f.x - x;
-    const dy = f.y - y;
+  for (const g of goals) {
+    const dx = g.x - x;
+    const dy = g.y - y;
     if (dx * dx + dy * dy < g2) return false;
   }
   return true;
@@ -44,18 +38,14 @@ function inBounds(x: number, y: number, bounds: Bounds, pad = 60): boolean {
 }
 
 /**
- * THE RULE: after claiming a place, a new fog spot rises somewhere nearby in
- * unexplored space — but the map is finite, so the spot must stay within bounds.
- * We search outward from the origin for a spot that is on land, well-spaced, and
- * inside the map; if the neighbourhood is full we fall back to any free land cell.
+ * Pick a land spot on the map, well-spaced from existing goals.
  */
-export function spawnNearbyFog(
+export function pickGoalPosition(
   originX: number,
   originY: number,
-  places: Place[],
-  fog: FogSpot[],
+  goals: Goal[],
   bounds: Bounds,
-): FogSpot {
+): { x: number; y: number } {
   const seed = (Math.floor(originX) * 73856093) ^ (Math.floor(originY) * 19349663);
   const rand = rng(seed >>> 0);
 
@@ -67,20 +57,19 @@ export function spawnNearbyFog(
     if (
       inBounds(x, y, bounds) &&
       biomeAt(x, y) !== "water" &&
-      farEnough(x, y, places, fog)
+      farEnough(x, y, goals)
     ) {
-      return { id: uid(), x, y };
+      return { x, y };
     }
   }
 
-  // Map neighbourhood is crowded — scan the whole finite map for any free land.
   for (let attempt = 0; attempt < 400; attempt++) {
     const x = (rand() - 0.5) * (bounds.w - 120);
     const y = (rand() - 0.5) * (bounds.h - 120);
-    if (biomeAt(x, y) !== "water" && farEnough(x, y, places, fog, MIN_GAP * 0.7)) {
-      return { id: uid(), x, y };
+    if (biomeAt(x, y) !== "water" && farEnough(x, y, goals, MIN_GAP * 0.7)) {
+      return { x, y };
     }
   }
 
-  return { id: uid(), x: originX + NEAR_MIN, y: originY };
+  return { x: originX + NEAR_MIN, y: originY };
 }

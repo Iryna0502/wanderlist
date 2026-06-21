@@ -7,7 +7,7 @@ import {
   useImperativeHandle,
   useRef,
 } from "react";
-import type { Bounds, Camera, FogSpot, Place } from "@/lib/types";
+import type { Bounds, Camera, Goal } from "@/lib/types";
 import {
   type Viewport,
   clampCamera,
@@ -16,7 +16,12 @@ import {
   screenToWorld,
   worldToScreen,
 } from "@/lib/camera";
-import { drawBackdrop, drawDynamic, placeMarkerLayout } from "@/lib/render";
+import {
+  drawBackdrop,
+  drawDynamic,
+  lockedMarkerLayout,
+  placeMarkerLayout,
+} from "@/lib/render";
 import { MAP_IMAGE_SRC } from "@/lib/world";
 
 /** Screen pixels of rubber-band slack allowed past the map edge while dragging. */
@@ -38,7 +43,6 @@ function rubberBand(
     };
     return { zoom: hard.zoom, x: damp(cam.x, hard.x), y: damp(cam.y, hard.y) };
   }
-  // Released: ease back inside the bounds.
   const k = 0.22;
   return {
     zoom: hard.zoom,
@@ -51,17 +55,15 @@ export interface MapHandle {
   flyTo: (x: number, y: number, zoom?: number) => void;
   jumpTo: (x: number, y: number, zoom?: number) => void;
   zoomBy: (factor: number) => void;
-  focusNearestFog: () => void;
 }
 
 interface Props {
-  places: Place[];
-  fog: FogSpot[];
+  goals: Goal[];
   bounds: Bounds;
   activeId?: string;
   reduced: boolean;
-  onTapFog: (spot: FogSpot) => void;
-  onTapPlace: (place: Place) => void;
+  onTapLocked: (goal: Goal) => void;
+  onTapUnlocked: (goal: Goal) => void;
 }
 
 interface PointerInfo {
@@ -72,14 +74,13 @@ interface PointerInfo {
 const FLY_MS = 750;
 
 const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
-  { places, fog, bounds, activeId, reduced, onTapFog, onTapPlace },
+  { goals, bounds, activeId, reduced, onTapLocked, onTapUnlocked },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const camRef = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
   const vpRef = useRef<Viewport>({ width: 0, height: 0, dpr: 1 });
-  const placesRef = useRef(places);
-  const fogRef = useRef(fog);
+  const goalsRef = useRef(goals);
   const boundsRef = useRef(bounds);
   const activeIdRef = useRef(activeId);
   const reducedRef = useRef(reduced);
@@ -99,8 +100,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     active: boolean;
   }>({ from: camRef.current, to: camRef.current, start: 0, active: false });
 
-  placesRef.current = places;
-  fogRef.current = fog;
+  goalsRef.current = goals;
   boundsRef.current = bounds;
   activeIdRef.current = activeId;
   reducedRef.current = reduced;
@@ -123,33 +123,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       const vp = vpRef.current;
       zoomAt(vp.width / 2, vp.height / 2, factor);
     },
-    focusNearestFog() {
-      const cam = camRef.current;
-      const list = fogRef.current;
-      if (!list.length) return;
-      let best = list[0];
-      let bestD = Infinity;
-      for (const f of list) {
-        const d = (f.x - cam.x) ** 2 + (f.y - cam.y) ** 2;
-        if (d < bestD) {
-          bestD = d;
-          best = f;
-        }
-      }
-      const to: Camera = { x: best.x, y: best.y, zoom: Math.max(cam.zoom, 1) };
-      if (reducedRef.current) camRef.current = to;
-      else
-        anim.current = {
-          from: { ...cam },
-          to,
-          start: performance.now(),
-          active: true,
-        };
-      onTapFog(best);
-    },
   }));
 
-  // Resize / DPR handling.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -168,7 +143,6 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     return () => window.removeEventListener("resize", resize);
   }, []);
 
-  // Center the map and fit it to cover the window whenever its size changes.
   useEffect(() => {
     const vp = vpRef.current;
     camRef.current = clampCamera(
@@ -179,7 +153,6 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     anim.current.active = false;
   }, [bounds]);
 
-  // Load the static map image once as an opaque backdrop.
   useEffect(() => {
     let cancelled = false;
     fetch(MAP_IMAGE_SRC)
@@ -200,22 +173,22 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     };
   }, []);
 
-  // Decode place photos to bitmaps for drawing as polaroids on the canvas.
   useEffect(() => {
     let cancelled = false;
     const cache = photosRef.current;
-    const ids = new Set(places.map((p) => p.id));
-    for (const p of places) {
-      if (p.photo && !cache.has(p.id)) {
-        createImageBitmap(p.photo)
+    const ids = new Set(
+      goals.filter((g) => g.status === "unlocked").map((g) => g.id),
+    );
+    for (const g of goals) {
+      if (g.status === "unlocked" && g.photo && !cache.has(g.id)) {
+        createImageBitmap(g.photo)
           .then((bm) => {
             if (cancelled) bm.close?.();
-            else cache.set(p.id, bm);
+            else cache.set(g.id, bm);
           })
           .catch(() => {});
       }
     }
-    // Drop bitmaps for removed places.
     for (const id of Array.from(cache.keys())) {
       if (!ids.has(id)) {
         cache.get(id)?.close?.();
@@ -225,9 +198,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     return () => {
       cancelled = true;
     };
-  }, [places]);
+  }, [goals]);
 
-  // Render loop: static backdrop image + cheap animated marker layer on top.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -237,19 +209,16 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     let lastTime = 0;
     let raf = 0;
     const loop = (t: number) => {
-      // Pause entirely when the tab is hidden.
       if (document.hidden) {
         raf = requestAnimationFrame(loop);
         return;
       }
-      // Throttle to ~40fps — plenty smooth, big battery/heat win.
       if (t - lastTime < 24) {
         raf = requestAnimationFrame(loop);
         return;
       }
       lastTime = t;
 
-      // Camera fly animation.
       const a = anim.current;
       if (a.active) {
         const p = Math.min(1, (t - a.start) / FLY_MS);
@@ -267,7 +236,6 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       if (a.active) {
         camRef.current = clampCamera(camRef.current, vp, bounds);
       } else {
-        // Rubber-band: soft overscroll while dragging, ease back when released.
         camRef.current = rubberBand(
           camRef.current,
           vp,
@@ -278,23 +246,20 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       const cam = camRef.current;
       const dpr = vp.dpr;
 
-      // Static map backdrop (single drawImage of the visible region).
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "#e3d2ad"; // parchment shows through any rubber-band gap
+      ctx.fillStyle = "#e3d2ad";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const bm = bitmapRef.current;
       if (bm) drawBackdrop(ctx, bm, cam, vp, bounds);
 
-      // Cheap animated marker layer.
       drawDynamic(ctx, {
         cam,
         vp,
         time: t,
         now: Date.now(),
-        places: placesRef.current,
-        fog: fogRef.current,
+        goals: goalsRef.current,
         photos: photosRef.current,
         activeId: activeIdRef.current,
         reduced: reducedRef.current,
@@ -327,41 +292,52 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     const cam = camRef.current;
     const vp = vpRef.current;
     const { cardW, cardH, campS, polaroidOffsetY } = placeMarkerLayout(cam.zoom);
-    // Place markers first (drawn on top). Hit polaroid or campsite.
-    for (let i = placesRef.current.length - 1; i >= 0; i--) {
-      const p = placesRef.current[i];
-      const s = worldToScreen(p.x, p.y, cam, vp);
+    const { lockW, fs, labelH, labelMaxW } = lockedMarkerLayout(cam.zoom);
+
+    const ordered = [...goalsRef.current].sort(
+      (a, b) =>
+        worldToScreen(b.x, b.y, cam, vp).y - worldToScreen(a.x, a.y, cam, vp).y,
+    );
+
+    for (const g of ordered) {
+      const s = worldToScreen(g.x, g.y, cam, vp);
+
+      if (g.status === "locked") {
+        const half = lockW * 0.5;
+        if (Math.abs(s.x - sx) <= half && Math.abs(s.y - sy) <= half) {
+          return { type: "locked" as const, goal: g };
+        }
+        // Title plaque below the lock (matches drawLockedMarker layout).
+        const plaqueY = s.y + lockW * 0.52 + 4;
+        const plaqueW = labelMaxW + fs * 0.9;
+        if (
+          sx >= s.x - plaqueW / 2 &&
+          sx <= s.x + plaqueW / 2 &&
+          sy >= plaqueY &&
+          sy <= plaqueY + labelH
+        ) {
+          return { type: "locked" as const, goal: g };
+        }
+        continue;
+      }
+
       const py = s.y - polaroidOffsetY();
       if (
         Math.abs(s.x - sx) < cardW * 0.55 &&
         Math.abs(py - sy) < cardH * 0.62
-      )
-        return { type: "place" as const, place: p };
+      ) {
+        return { type: "unlocked" as const, goal: g };
+      }
       if (
         Math.abs(s.x - sx) < campS * 1.1 &&
         Math.abs(s.y - sy) < campS * 1.1
-      )
-        return { type: "place" as const, place: p };
-    }
-    const lockW = Math.max(34, Math.min(70, 52 * cam.zoom));
-    for (let i = fogRef.current.length - 1; i >= 0; i--) {
-      const f = fogRef.current[i];
-      if (
-        placesRef.current.some(
-          (p) => (p.x - f.x) ** 2 + (p.y - f.y) ** 2 < 80 ** 2,
-        )
-      )
-        continue;
-      const s = worldToScreen(f.x, f.y, cam, vp);
-      const dx = s.x - sx;
-      const dy = s.y - sy;
-      const r = lockW * 0.8;
-      if (dx * dx + dy * dy < r * r) return { type: "fog" as const, fog: f };
+      ) {
+        return { type: "unlocked" as const, goal: g };
+      }
     }
     return null;
   }, []);
 
-  // Pointer / gesture handlers.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -392,9 +368,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
         const dist = Math.hypot(a.x - b.x, a.y - b.y);
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         if (pinchDist.current && pinchMid.current) {
-          // Zoom around the pinch midpoint.
           zoomAt(mid.x, mid.y, dist / pinchDist.current);
-          // Pan with the midpoint drift.
           const cam = camRef.current;
           cam.x -= (mid.x - pinchMid.current.x) / cam.zoom;
           cam.y -= (mid.y - pinchMid.current.y) / cam.zoom;
@@ -405,7 +379,6 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
         return;
       }
 
-      // Single-pointer drag → pan.
       const cam = camRef.current;
       const dx = pt.x - prev.x;
       const dy = pt.y - prev.y;
@@ -434,8 +407,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
       if (wasTap) {
         const hit = hitTest(pt.x, pt.y);
-        if (hit?.type === "place") onTapPlace(hit.place);
-        else if (hit?.type === "fog") onTapFog(hit.fog);
+        if (hit?.type === "locked") onTapLocked(hit.goal);
+        else if (hit?.type === "unlocked") onTapUnlocked(hit.goal);
       }
       downAt.current = null;
     };
@@ -459,13 +432,13 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       canvas.removeEventListener("pointercancel", onUp);
       canvas.removeEventListener("wheel", onWheel);
     };
-  }, [hitTest, onTapFog, onTapPlace, zoomAt]);
+  }, [hitTest, onTapLocked, onTapUnlocked, zoomAt]);
 
   return (
     <canvas
       ref={canvasRef}
       className="block h-full w-full touch-none select-none"
-      aria-label="Explorable map of your discovered places"
+      aria-label="Explorable map of your goals and memories"
     />
   );
 });

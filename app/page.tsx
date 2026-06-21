@@ -1,20 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { FogSpot, Place } from "@/lib/types";
-import { usePlaces } from "@/hooks/usePlaces";
+import type { Goal } from "@/lib/types";
+import { useGoals } from "@/hooks/useGoals";
 import MapCanvas, { type MapHandle } from "@/components/MapCanvas";
 import Hud from "@/components/Hud";
 import BottomSheet from "@/components/BottomSheet";
-import ClaimForm from "@/components/ClaimForm";
+import GoalForm from "@/components/GoalForm";
+import UnlockForm from "@/components/UnlockForm";
+import EditGoalForm from "@/components/EditGoalForm";
 import PlaceDetail from "@/components/PlaceDetail";
 import Gallery from "@/components/Gallery";
 import Celebration from "@/components/Celebration";
 
 type Sheet =
-  | { kind: "claim"; fog: FogSpot }
-  | { kind: "detail"; place: Place }
-  | { kind: "edit"; place: Place }
+  | { kind: "addGoal" }
+  | { kind: "unlockGoal"; goal: Goal }
+  | { kind: "detail"; goal: Goal }
+  | { kind: "edit"; goal: Goal }
   | null;
 
 function usePrefersReducedMotion() {
@@ -30,32 +33,35 @@ function usePrefersReducedMotion() {
 }
 
 export default function Page() {
-  const { state, ready, claim, updatePlace, removePhoto, deletePlace, latestPlace } =
-    usePlaces();
+  const { state, ready, addGoal, unlockGoal, updateGoal, deleteGoal, latestUnlocked } =
+    useGoals();
   const reduced = usePrefersReducedMotion();
   const mapRef = useRef<MapHandle>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
-  const [celebrate, setCelebrate] = useState<Place | null>(null);
+  const [celebrate, setCelebrate] = useState<Goal | null>(null);
 
   const recenter = () => {
-    const target = latestPlace ?? { x: 0, y: 0 };
+    const target = latestUnlocked ?? { x: 0, y: 0 };
     mapRef.current?.flyTo(target.x, target.y, 1.1);
   };
 
-  const handleClaim = (data: {
-    title: string;
-    text: string;
-    location: string;
-    companions: Place["companions"];
-    photo: Blob | null;
-  }) => {
-    if (sheet?.kind !== "claim") return;
-    const place = claim({ fogId: sheet.fog.id, ...data });
+  const handleAddGoal = (title: string) => {
+    const goal = addGoal({ title });
     setSheet(null);
-    if (place) {
-      mapRef.current?.jumpTo(place.x, place.y, 1.25);
-      setCelebrate(place);
+    if (goal) mapRef.current?.flyTo(goal.x, goal.y, 1.2);
+  };
+
+  const handleUnlock = (data: { photo: Blob; text: string }) => {
+    if (sheet?.kind !== "unlockGoal") return;
+    const goal = unlockGoal(sheet.goal.id, {
+      photo: data.photo,
+      text: data.text,
+    });
+    setSheet(null);
+    if (goal) {
+      mapRef.current?.jumpTo(goal.x, goal.y, 1.25);
+      setCelebrate(goal);
     }
   };
 
@@ -63,12 +69,12 @@ export default function Page() {
     title: string;
     text: string;
     location: string;
-    companions: Place["companions"];
+    companions: Goal["companions"];
     photo: Blob | null;
   }) => {
     if (sheet?.kind !== "edit") return;
-    const base = sheet.place;
-    updatePlace(base.id, {
+    const base = sheet.goal;
+    updateGoal(base.id, {
       title: data.title.trim() || base.title,
       text: data.text.trim(),
       location: data.location.trim() || undefined,
@@ -77,7 +83,7 @@ export default function Page() {
     });
     setSheet({
       kind: "detail",
-      place: {
+      goal: {
         ...base,
         title: data.title.trim() || base.title,
         text: data.text.trim(),
@@ -88,18 +94,19 @@ export default function Page() {
     });
   };
 
+  const unlockedGoals = state.goals.filter((g) => g.status === "unlocked");
+
   return (
     <main className="map-frame relative h-full w-full overflow-hidden">
       {ready && (
         <MapCanvas
           ref={mapRef}
-          places={state.places}
-          fog={state.fog}
+          goals={state.goals}
           bounds={state.bounds}
-          activeId={latestPlace?.id}
+          activeId={latestUnlocked?.id}
           reduced={reduced}
-          onTapFog={(fog) => setSheet({ kind: "claim", fog })}
-          onTapPlace={(place) => setSheet({ kind: "detail", place })}
+          onTapLocked={(goal) => setSheet({ kind: "unlockGoal", goal })}
+          onTapUnlocked={(goal) => setSheet({ kind: "detail", goal })}
         />
       )}
 
@@ -113,7 +120,7 @@ export default function Page() {
 
       {ready && (
         <Hud
-          onAddExperience={() => mapRef.current?.focusNearestFog()}
+          onAddExperience={() => setSheet({ kind: "addGoal" })}
           onRecenter={recenter}
           onZoomIn={() => mapRef.current?.zoomBy(1.25)}
           onZoomOut={() => mapRef.current?.zoomBy(0.8)}
@@ -122,16 +129,16 @@ export default function Page() {
 
       <Gallery
         open={galleryOpen}
-        places={state.places}
+        goals={unlockedGoals}
         onClose={() => setGalleryOpen(false)}
-        onSelect={(place) => {
+        onSelect={(goal) => {
           setGalleryOpen(false);
-          setSheet({ kind: "detail", place });
+          setSheet({ kind: "detail", goal });
         }}
       />
 
       <Celebration
-        place={celebrate}
+        goal={celebrate}
         reduced={reduced}
         onView={() => {
           if (celebrate) mapRef.current?.flyTo(celebrate.x, celebrate.y, 1.25);
@@ -141,12 +148,30 @@ export default function Page() {
       />
 
       <BottomSheet
-        open={sheet?.kind === "claim"}
+        open={sheet?.kind === "addGoal"}
         onClose={() => setSheet(null)}
-        labelledBy="claim-title"
+        labelledBy="add-goal-title"
       >
-        {sheet?.kind === "claim" && (
-          <ClaimForm onSubmit={handleClaim} onCancel={() => setSheet(null)} />
+        {sheet?.kind === "addGoal" && (
+          <GoalForm
+            onSubmit={handleAddGoal}
+            onCancel={() => setSheet(null)}
+          />
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        open={sheet?.kind === "unlockGoal"}
+        onClose={() => setSheet(null)}
+        labelledBy="unlock-title"
+      >
+        {sheet?.kind === "unlockGoal" && (
+          <UnlockForm
+            key={sheet.goal.id}
+            goal={state.goals.find((g) => g.id === sheet.goal.id) ?? sheet.goal}
+            onSubmit={handleUnlock}
+            onCancel={() => setSheet(null)}
+          />
         )}
       </BottomSheet>
 
@@ -154,19 +179,19 @@ export default function Page() {
         open={sheet?.kind === "edit"}
         onClose={() =>
           setSheet((s) =>
-            s?.kind === "edit" ? { kind: "detail", place: s.place } : s,
+            s?.kind === "edit" ? { kind: "detail", goal: s.goal } : s,
           )
         }
         labelledBy="edit-title"
       >
         {sheet?.kind === "edit" && (
-          <ClaimForm
-            key={sheet.place.id}
-            place={
-              state.places.find((p) => p.id === sheet.place.id) ?? sheet.place
+          <EditGoalForm
+            key={sheet.goal.id}
+            goal={
+              state.goals.find((g) => g.id === sheet.goal.id) ?? sheet.goal
             }
             onSubmit={handleEdit}
-            onCancel={() => setSheet({ kind: "detail", place: sheet.place })}
+            onCancel={() => setSheet({ kind: "detail", goal: sheet.goal })}
           />
         )}
       </BottomSheet>
@@ -177,16 +202,14 @@ export default function Page() {
         labelledBy="detail-title"
       >
         {sheet?.kind === "detail" && (() => {
-          const place =
-            state.places.find((p) => p.id === sheet.place.id) ?? sheet.place;
+          const goal =
+            state.goals.find((g) => g.id === sheet.goal.id) ?? sheet.goal;
           return (
             <PlaceDetail
-              place={place}
-              onEdit={() => setSheet({ kind: "edit", place })}
-              onAddPhoto={(photo) => updatePlace(place.id, { photo })}
-              onRemovePhoto={() => removePhoto(place.id)}
+              goal={goal}
+              onEdit={() => setSheet({ kind: "edit", goal })}
               onDelete={() => {
-                deletePlace(place.id);
+                deleteGoal(goal.id);
                 setSheet(null);
               }}
             />
