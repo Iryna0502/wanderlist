@@ -46,8 +46,12 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
           return URL.createObjectURL(blob);
         });
         onChange(blob);
-      } catch {
-        setError("Couldn't process that image.");
+      } catch (err) {
+        setError(
+          err instanceof Error && err.message
+            ? err.message
+            : "Couldn't process that image.",
+        );
         onChange(null);
       } finally {
         setBusy(false);

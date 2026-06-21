@@ -5,7 +5,23 @@
 const MAX_EDGE = 900;
 const JPEG_QUALITY = 0.82;
 
+function isHeic(file: File): boolean {
+  const type = file.type.toLowerCase();
+  if (type.includes("heic") || type.includes("heif")) return true;
+  const name = file.name.toLowerCase();
+  return name.endsWith(".heic") || name.endsWith(".heif");
+}
+
 export async function compressImage(file: File): Promise<Blob> {
+  if (file.size === 0) {
+    throw new Error("That file looks empty. Try choosing the photo again.");
+  }
+  if (isHeic(file)) {
+    throw new Error(
+      "HEIC photos aren't supported in most browsers. Export as JPEG or PNG, or on iPhone choose Settings → Camera → Formats → Most Compatible.",
+    );
+  }
+
   const bitmap = await loadBitmap(file);
   const { width, height } = bitmap;
 
@@ -28,7 +44,11 @@ export async function compressImage(file: File): Promise<Blob> {
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY),
   );
-  if (!blob) throw new Error("Failed to encode image");
+  if (!blob) {
+    throw new Error(
+      "Couldn't save that image after resizing. Try a JPEG or PNG instead.",
+    );
+  }
   return blob;
 }
 
@@ -47,6 +67,10 @@ async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
     img.src = url;
     await img.decode();
     return img;
+  } catch {
+    throw new Error(
+      "This browser can't read that image format. Use a JPEG or PNG photo.",
+    );
   } finally {
     URL.revokeObjectURL(url);
   }
