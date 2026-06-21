@@ -52,10 +52,11 @@ export default function Page() {
     if (goal) mapRef.current?.flyTo(goal.x, goal.y, 1.2);
   };
 
-  const handleUnlock = (data: { photo: Blob; text: string }) => {
+  const handleUnlock = (data: { photo: Blob; text: string; title: string }) => {
     if (sheet?.kind !== "unlockGoal") return;
     const goal = unlockGoal(sheet.goal.id, {
       photo: data.photo,
+      title: data.title,
       text: data.text,
     });
     setSheet(null);

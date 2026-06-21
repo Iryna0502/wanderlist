@@ -6,11 +6,12 @@ import PhotoInput from "./PhotoInput";
 
 interface Props {
   goal: Goal;
-  onSubmit: (data: { photo: Blob; text: string }) => void;
+  onSubmit: (data: { photo: Blob; text: string; title: string }) => void;
   onCancel: () => void;
 }
 
 export default function UnlockForm({ goal, onSubmit, onCancel }: Props) {
+  const [title, setTitle] = useState(goal.title);
   const [photo, setPhoto] = useState<Blob | null>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -19,23 +20,37 @@ export default function UnlockForm({ goal, onSubmit, onCancel }: Props) {
     <form
       onSubmit={(e) => {
         e.preventDefault();
+        const trimmedTitle = title.trim();
+        if (!trimmedTitle) {
+          setError("Give your goal a title.");
+          return;
+        }
         if (!photo) {
           setError("Add a photo to complete this goal.");
           return;
         }
         setError(null);
-        onSubmit({ photo, text });
+        onSubmit({ photo, text, title: trimmedTitle });
       }}
       className="pb-2"
     >
       <h2 id="unlock-title" className="font-display text-2xl text-ink">
         Complete your goal
       </h2>
-      <p className="mt-1 font-hand text-xl text-ink">{goal.title}</p>
       <p className="mt-1 text-sm text-ink-soft">
         Upload a photo as proof — the lock opens and your memory appears on the map.
       </p>
 
+      <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-ink-soft">
+        Goal title
+      </label>
+      <input
+        autoFocus
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        maxLength={60}
+        className="mt-1 w-full rounded-xl border-2 border-ink/15 bg-parchment px-3 py-3 font-hand text-xl text-ink outline-none placeholder:text-ink-faint focus:border-primary"
+      />
       <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-ink-soft">
         Proof photo
       </label>

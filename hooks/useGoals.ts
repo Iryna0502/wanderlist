@@ -18,6 +18,7 @@ export interface AddGoalInput {
 
 export interface UnlockGoalInput {
   photo: Blob;
+  title?: string;
   text?: string;
   location?: string;
   companions?: Companions;
@@ -54,6 +55,7 @@ export function useGoals() {
           }
         }
         if (!cancelled) {
+          world = { ...world, bounds: mapBounds() };
           lastSaved.current = world;
           setState(world);
         }
@@ -123,6 +125,7 @@ export function useGoals() {
       const next: Goal = {
         ...goal,
         status: "unlocked",
+        title: input.title?.trim() || goal.title,
         photo: input.photo,
         text: input.text?.trim() ?? goal.text,
         location: input.location?.trim() || undefined,

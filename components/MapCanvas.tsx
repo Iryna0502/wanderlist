@@ -128,8 +128,11 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      const prevVp = { ...vpRef.current };
+      const prevFit = coverZoom(prevVp, boundsRef.current);
+      const dpr = window.devicePixelRatio || 1;
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
       canvas.width = Math.round(w * dpr);
@@ -137,10 +140,29 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       vpRef.current = { width: w, height: h, dpr };
       const ctx = canvas.getContext("2d");
       if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const cam = camRef.current;
+      const atCover = cam.zoom <= prevFit * 1.001;
+      const newFit = coverZoom(vpRef.current, boundsRef.current);
+      if (atCover) {
+        camRef.current = clampCamera({ x: 0, y: 0, zoom: newFit }, vpRef.current, boundsRef.current);
+      } else {
+        camRef.current = clampCamera(
+          { ...cam, zoom: cam.zoom * (newFit / prevFit) },
+          vpRef.current,
+          boundsRef.current,
+        );
+      }
+      anim.current.active = false;
     };
+
     resize();
     window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
+    window.addEventListener("orientationchange", resize);
+    return () => {
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("orientationchange", resize);
+    };
   }, []);
 
   useEffect(() => {

@@ -1,6 +1,6 @@
 import type { Bounds, Goal, WorldState } from "./types";
+import { WORLD } from "./world";
 
-const DEFAULT_BOUNDS: Bounds = { w: 1200, h: 1600 };
 export const SCHEMA_VERSION = 3;
 
 /**
@@ -110,7 +110,7 @@ function migrateRecords(records: unknown[], meta: StoredMeta | undefined): World
   return {
     goals: kept,
     nextOrder: meta?.nextOrder ?? kept.length,
-    bounds: meta?.bounds ?? DEFAULT_BOUNDS,
+    bounds: WORLD,
     mapLayoutVersion: meta?.mapLayoutVersion,
   };
 }

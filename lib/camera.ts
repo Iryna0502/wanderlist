@@ -16,7 +16,14 @@ export function clampZoom(z: number): number {
 /** Smallest zoom at which the map image still fully covers the viewport. */
 export function coverZoom(vp: Viewport, bounds: Bounds): number {
   if (!vp.width || !vp.height) return 1;
+  // Cover = Math.max (fill viewport, crop overflow). Contain would use Math.min (letterbox).
   return Math.max(vp.width / bounds.w, vp.height / bounds.h);
+}
+
+/** Largest zoom at which the entire map fits inside the viewport (letterbox). Not used for the base map scale. */
+export function fitZoom(vp: Viewport, bounds: Bounds): number {
+  if (!vp.width || !vp.height) return 1;
+  return Math.min(vp.width / bounds.w, vp.height / bounds.h);
 }
 
 /**
