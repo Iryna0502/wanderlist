@@ -75,6 +75,9 @@ interface PointerInfo {
 
 const FLY_MS = 750;
 const GOAL_DRAG_THRESHOLD = 8;
+const GOAL_LONG_PRESS_MS = 480;
+const GOAL_LONG_PRESS_SLOP = 14;
+const TOUCH_HIT_PAD = 1.6;
 
 interface GoalDragState {
   id: string;
@@ -82,6 +85,16 @@ interface GoalDragState {
   offsetY: number;
   x: number;
   y: number;
+}
+
+interface PendingGoalDrag {
+  id: string;
+  offsetX: number;
+  offsetY: number;
+  startX: number;
+  startY: number;
+  useLongPress: boolean;
+  longPressTimer: number | null;
 }
 
 const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
@@ -103,17 +116,22 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
   const pinchMid = useRef<{ x: number; y: number } | null>(null);
   const downAt = useRef<{ x: number; y: number; t: number } | null>(null);
   const moved = useRef(false);
-  const pendingGoalDrag = useRef<{
-    id: string;
-    offsetX: number;
-    offsetY: number;
-    startX: number;
-    startY: number;
-  } | null>(null);
+  const pendingGoalDrag = useRef<PendingGoalDrag | null>(null);
   const goalDrag = useRef<GoalDragState | null>(null);
   const onMoveGoalRef = useRef(onMoveGoal);
+  const touchTargetsRef = useRef(false);
 
   onMoveGoalRef.current = onMoveGoal;
+
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse)");
+    touchTargetsRef.current = mq.matches;
+    const onChange = () => {
+      touchTargetsRef.current = mq.matches;
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   const anim = useRef<{
     from: Camera;
@@ -340,6 +358,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     const vp = vpRef.current;
     const { cardW, cardH, campS, polaroidOffsetY } = placeMarkerLayout(cam.zoom);
     const { lockW, fs, labelH, labelMaxW } = lockedMarkerLayout(cam.zoom);
+    const pad = touchTargetsRef.current ? TOUCH_HIT_PAD : 1;
 
     const ordered = [...goalsRef.current].sort(
       (a, b) =>
@@ -350,19 +369,23 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       const s = worldToScreen(g.x, g.y, cam, vp);
 
       if (g.status === "locked") {
-        const half = lockW * 0.5;
+        const half = lockW * 0.5 * pad;
         if (Math.abs(s.x - sx) <= half && Math.abs(s.y - sy) <= half) {
           return { type: "locked" as const, goal: g };
         }
-        // Title plaque below the lock (matches drawLockedMarker layout).
         const plaqueY = s.y + lockW * 0.52 + 4;
-        const plaqueW = labelMaxW + fs * 0.9;
+        const plaqueW = (labelMaxW + fs * 0.9) * pad;
+        const plaqueH = labelH * pad;
         if (
           sx >= s.x - plaqueW / 2 &&
           sx <= s.x + plaqueW / 2 &&
-          sy >= plaqueY &&
-          sy <= plaqueY + labelH
+          sy >= plaqueY - plaqueH * 0.15 &&
+          sy <= plaqueY + plaqueH
         ) {
+          return { type: "locked" as const, goal: g };
+        }
+        const grabR = (lockW + labelH + lockW * 0.45) * 0.55 * pad;
+        if (Math.hypot(sx - s.x, sy - s.y) <= grabR) {
           return { type: "locked" as const, goal: g };
         }
         continue;
@@ -370,25 +393,25 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
       const py = s.y - polaroidOffsetY();
       if (
-        Math.abs(s.x - sx) < cardW * 0.55 &&
-        Math.abs(py - sy) < cardH * 0.62
+        Math.abs(s.x - sx) < cardW * 0.55 * pad &&
+        Math.abs(py - sy) < cardH * 0.62 * pad
       ) {
         return { type: "unlocked" as const, goal: g };
       }
       const titleBottom = s.y - campS * 0.85 - 8;
       const titleTop = titleBottom - labelH;
-      const plaqueW = labelMaxW + fs * 0.9;
+      const plaqueW = (labelMaxW + fs * 0.9) * pad;
       if (
         sx >= s.x - plaqueW / 2 &&
         sx <= s.x + plaqueW / 2 &&
-        sy >= titleTop &&
-        sy <= titleBottom + labelH
+        sy >= titleTop - labelH * 0.15 * pad &&
+        sy <= titleBottom + labelH * pad
       ) {
         return { type: "unlocked" as const, goal: g };
       }
       if (
-        Math.abs(s.x - sx) < campS * 1.1 &&
-        Math.abs(s.y - sy) < campS * 1.1
+        Math.abs(s.x - sx) < campS * 1.1 * pad &&
+        Math.abs(s.y - sy) < campS * 1.1 * pad
       ) {
         return { type: "unlocked" as const, goal: g };
       }
@@ -400,6 +423,30 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    const clearPendingGoalDrag = () => {
+      const pending = pendingGoalDrag.current;
+      if (pending?.longPressTimer != null) {
+        window.clearTimeout(pending.longPressTimer);
+      }
+      pendingGoalDrag.current = null;
+    };
+
+    const beginGoalDrag = (pending: PendingGoalDrag) => {
+      const g = goalsRef.current.find((goal) => goal.id === pending.id);
+      if (!g) return false;
+      goalDrag.current = {
+        id: pending.id,
+        offsetX: pending.offsetX,
+        offsetY: pending.offsetY,
+        x: g.x,
+        y: g.y,
+      };
+      canvas.style.cursor = "grabbing";
+      navigator.vibrate?.(12);
+      moved.current = true;
+      return true;
+    };
+
     const onDown = (e: PointerEvent) => {
       anim.current.active = false;
       canvas.setPointerCapture(e.pointerId);
@@ -408,7 +455,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       if (pointers.current.size === 1) {
         downAt.current = { x: pt.x, y: pt.y, t: performance.now() };
         moved.current = false;
-        pendingGoalDrag.current = null;
+        clearPendingGoalDrag();
         goalDrag.current = null;
 
         const hit = hitTest(pt.x, pt.y);
@@ -416,16 +463,26 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
           const cam = camRef.current;
           const vp = vpRef.current;
           const world = screenToWorld(pt.x, pt.y, cam, vp);
-          pendingGoalDrag.current = {
+          const useLongPress = e.pointerType === "touch";
+          const pending: PendingGoalDrag = {
             id: hit.goal.id,
             offsetX: world.x - hit.goal.x,
             offsetY: world.y - hit.goal.y,
             startX: pt.x,
             startY: pt.y,
+            useLongPress,
+            longPressTimer: null,
           };
+          if (useLongPress) {
+            pending.longPressTimer = window.setTimeout(() => {
+              if (pendingGoalDrag.current?.id !== pending.id) return;
+              beginGoalDrag(pending);
+            }, GOAL_LONG_PRESS_MS);
+          }
+          pendingGoalDrag.current = pending;
         }
       } else if (pointers.current.size === 2) {
-        pendingGoalDrag.current = null;
+        clearPendingGoalDrag();
         goalDrag.current = null;
         const [a, b] = [...pointers.current.values()];
         pinchDist.current = Math.hypot(a.x - b.x, a.y - b.y);
@@ -440,7 +497,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       pointers.current.set(e.pointerId, pt);
 
       if (pointers.current.size === 2) {
-        pendingGoalDrag.current = null;
+        clearPendingGoalDrag();
         goalDrag.current = null;
         const [a, b] = [...pointers.current.values()];
         const dist = Math.hypot(a.x - b.x, a.y - b.y);
@@ -460,21 +517,17 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       if (pointers.current.size === 1) {
         const pending = pendingGoalDrag.current;
         if (pending && !goalDrag.current) {
-          if (
-            Math.hypot(pt.x - pending.startX, pt.y - pending.startY) >=
-            GOAL_DRAG_THRESHOLD
-          ) {
-            const g = goalsRef.current.find((goal) => goal.id === pending.id);
-            if (g) {
-              goalDrag.current = {
-                id: pending.id,
-                offsetX: pending.offsetX,
-                offsetY: pending.offsetY,
-                x: g.x,
-                y: g.y,
-              };
-              canvas.style.cursor = "grabbing";
+          const slop = Math.hypot(pt.x - pending.startX, pt.y - pending.startY);
+          if (pending.useLongPress) {
+            if (slop > GOAL_LONG_PRESS_SLOP) {
+              clearPendingGoalDrag();
+            } else {
+              return;
             }
+          } else if (slop >= GOAL_DRAG_THRESHOLD) {
+            beginGoalDrag(pending);
+          } else {
+            return;
           }
         }
 
@@ -511,7 +564,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
         goalDrag.current = null;
         canvas.style.cursor = "";
       }
-      pendingGoalDrag.current = null;
+      clearPendingGoalDrag();
 
       const wasTap =
         pointers.current.size === 1 &&
