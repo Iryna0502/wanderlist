@@ -59,6 +59,7 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
         onChange(null);
       } finally {
         setBusy(false);
+        if (inputRef.current) inputRef.current.value = "";
       }
     },
     [onChange],
@@ -70,7 +71,6 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
         ref={inputRef}
         type="file"
         accept="image/*,.heic,.heif,image/heic,image/heif"
-        capture="environment"
         className="sr-only"
         onChange={(e) => handleFile(e.target.files?.[0])}
       />

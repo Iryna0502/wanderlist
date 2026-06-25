@@ -14,10 +14,13 @@ export function isHeicFile(file: File): boolean {
   return /\.heic$|\.heif$/i.test(file.name);
 }
 
-/** True for normal image MIME types and HEIC picked without a reliable type. */
+/** True for normal image MIME types, HEIC, and gallery picks with missing type. */
 export function isPhotoFile(file: File): boolean {
   if (file.type.startsWith("image/")) return true;
-  return isHeicFile(file);
+  if (isHeicFile(file)) return true;
+  // iOS/Android gallery picks sometimes omit MIME type.
+  if (!file.type && file.size > 0) return true;
+  return false;
 }
 
 /** Convert HEIC/HEIF to JPEG on-device; pass through everything else unchanged. */
