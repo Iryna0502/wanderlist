@@ -1,41 +1,13 @@
 import type { Bounds, Goal, WorldState } from "./types";
 import { biomeAt } from "./biome";
+import { GOAL_SPOTS, goalInBounds, spotXY } from "./goalSpots";
 import { uid } from "./spawn";
 
 /** Bump when the map art or spot layout changes — triggers a one-time relayout. */
 export const MAP_LAYOUT_VERSION = 3;
 
-/**
- * Landmark positions on the 1024×1024 map (fractions of half-extent, −1…1).
- * Tuned to paths and features on the current illustration.
- */
-export const GOAL_SPOTS: Array<[number, number]> = [
-  [0, 0.02],
-  [0.04, -0.44],
-  [-0.5, 0.44],
-  [0.36, -0.38],
-  [-0.42, -0.12],
-  [0.38, 0.08],
-  [0.28, 0.4],
-  [0.12, -0.58],
-  [0.22, 0.32],
-  [-0.28, 0.18],
-  [0.48, 0.22],
-  [-0.12, -0.38],
-  [0.08, 0.52],
-  [-0.55, -0.35],
-];
-
-/** World xy from fractional map coordinates, clamped inside the image. */
-export function spotXY(fx: number, fy: number, bounds: Bounds): { x: number; y: number } {
-  const pad = 48;
-  const hx = bounds.w / 2 - pad;
-  const hy = bounds.h / 2 - pad;
-  return {
-    x: Math.max(-hx, Math.min(hx, fx * hx)),
-    y: Math.max(-hy, Math.min(hy, fy * hy)),
-  };
-}
+/** @deprecated Use GOAL_SPOTS from ./goalSpots */
+export { GOAL_SPOTS } from "./goalSpots";
 
 /** Re-seat every goal onto the current map layout (keeps all data). */
 export function relayoutWorld(world: WorldState, bounds: Bounds): WorldState {
@@ -48,6 +20,19 @@ export function relayoutWorld(world: WorldState, bounds: Bounds): WorldState {
     });
 
   return { ...world, goals, bounds };
+}
+
+/** Move any off-map goals onto predefined landmark spots. */
+export function ensureGoalsOnMap(world: WorldState, bounds: Bounds): WorldState {
+  let changed = false;
+  const goals = world.goals.map((g, i) => {
+    if (goalInBounds(g.x, g.y, bounds)) return g;
+    changed = true;
+    const [fx, fy] = GOAL_SPOTS[i % GOAL_SPOTS.length];
+    const { x, y } = spotXY(fx, fy, bounds);
+    return { ...g, x, y, biome: biomeAt(x, y) };
+  });
+  return changed ? { ...world, goals, bounds } : world;
 }
 
 function makeSeedPhoto(a: string, b: string, c: string): Promise<Blob | null> {

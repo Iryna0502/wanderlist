@@ -38,7 +38,7 @@ export default function EditGoalForm({ goal, onSubmit, onCancel }: Props) {
         Edit memory
       </h2>
       <p className="mt-1 text-sm text-ink-soft">
-        Update the story of this goal on your map.
+        Update the story of this experience on your map.
       </p>
 
       <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-ink-soft">

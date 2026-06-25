@@ -13,4 +13,4 @@ export const FIGMA_NODE_ID = "3446:1983";
 export const MAP_IMAGE_SRC = "/map.webp";
 
 /** WORLD bounds = the map image's natural pixel dimensions (1× export). */
-export const WORLD: Bounds = { w: 1024, h: 1024 };
+export const WORLD: Bounds = { w: 2896, h: 2896 };

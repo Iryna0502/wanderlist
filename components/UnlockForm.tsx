@@ -1,20 +1,63 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Goal } from "@/lib/types";
+import DeleteGoalDialog from "./DeleteGoalDialog";
 import PhotoInput from "./PhotoInput";
 
 interface Props {
   goal: Goal;
   onSubmit: (data: { photo: Blob; text: string; title: string }) => void;
-  onCancel: () => void;
+  onSave: (data: { title: string; text: string; photo: Blob | null }) => void;
+  onClose: () => void;
+  onDelete: () => void;
 }
 
-export default function UnlockForm({ goal, onSubmit, onCancel }: Props) {
+export default function UnlockForm({ goal, onSubmit, onSave, onClose, onDelete }: Props) {
   const [title, setTitle] = useState(goal.title);
-  const [photo, setPhoto] = useState<Blob | null>(null);
-  const [text, setText] = useState("");
+  const [photo, setPhoto] = useState<Blob | null>(goal.photo);
+  const [text, setText] = useState(goal.text);
   const [error, setError] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  useEffect(() => {
+    setTitle(goal.title);
+    setText(goal.text);
+    setPhoto(goal.photo);
+    setDeleteOpen(false);
+  }, [goal.id]);
+
+  const draft = () => ({
+    title: title.trim(),
+    text: text.trim(),
+    photo,
+  });
+
+  const saveDraft = () => {
+    const data = draft();
+    if (!data.title) {
+      setError("Give your experience a title.");
+      return false;
+    }
+    setError(null);
+    onSave(data);
+    return true;
+  };
+
+  useEffect(() => {
+    const data = draft();
+    if (!data.title) return;
+    if (
+      data.title === goal.title &&
+      data.text === goal.text &&
+      data.photo === goal.photo
+    ) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => onSave(data), 400);
+    return () => window.clearTimeout(timer);
+  }, [title, text, photo, goal.title, goal.text, goal.photo, onSave]);
 
   return (
     <form
@@ -22,11 +65,11 @@ export default function UnlockForm({ goal, onSubmit, onCancel }: Props) {
         e.preventDefault();
         const trimmedTitle = title.trim();
         if (!trimmedTitle) {
-          setError("Give your goal a title.");
+          setError("Give your experience a title.");
           return;
         }
         if (!photo) {
-          setError("Add a photo to complete this goal.");
+          setError("Add a photo to complete this experience.");
           return;
         }
         setError(null);
@@ -35,14 +78,14 @@ export default function UnlockForm({ goal, onSubmit, onCancel }: Props) {
       className="pb-2"
     >
       <h2 id="unlock-title" className="font-display text-2xl text-ink">
-        Complete your goal
+        Complete your experience
       </h2>
       <p className="mt-1 text-sm text-ink-soft">
         Upload a photo as proof — the lock opens and your memory appears on the map.
       </p>
 
       <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-ink-soft">
-        Goal title
+        Experience title
       </label>
       <input
         autoFocus
@@ -55,7 +98,7 @@ export default function UnlockForm({ goal, onSubmit, onCancel }: Props) {
         Proof photo
       </label>
       <div className="mt-1">
-        <PhotoInput onChange={setPhoto} />
+        <PhotoInput key={goal.id} initialBlob={goal.photo} onChange={setPhoto} />
       </div>
 
       <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-ink-soft">
@@ -75,18 +118,42 @@ export default function UnlockForm({ goal, onSubmit, onCancel }: Props) {
       <div className="mt-5 flex gap-3">
         <button
           type="button"
-          onClick={onCancel}
+          onClick={() => {
+            if (saveDraft()) onClose();
+          }}
           className="min-h-[48px] flex-1 rounded-xl border-2 border-ink/15 bg-parchment font-semibold text-ink-soft"
         >
-          Cancel
+          Save
         </button>
         <button
           type="submit"
-          className="min-h-[48px] flex-[2] rounded-xl bg-primary font-semibold text-parchment-light shadow-marker active:translate-y-px"
+          disabled={!photo}
+          className="min-h-[48px] flex-[2] rounded-xl bg-primary font-semibold text-parchment-light shadow-marker active:translate-y-px disabled:opacity-50"
         >
-          ✦ Complete goal
+          ✦ Complete experience
         </button>
       </div>
+
+      <div className="mt-4 flex justify-center">
+        <button
+          type="button"
+          onClick={() => setDeleteOpen(true)}
+          className="text-sm font-semibold text-red-900/75 underline decoration-red-900/25 underline-offset-2 hover:text-red-900"
+        >
+          Delete experience
+        </button>
+      </div>
+
+      <DeleteGoalDialog
+        open={deleteOpen}
+        title="Delete this experience?"
+        description={`"${title.trim() || goal.title}" will be removed from the map.`}
+        onCancel={() => setDeleteOpen(false)}
+        onConfirm={() => {
+          setDeleteOpen(false);
+          onDelete();
+        }}
+      />
     </form>
   );
 }

@@ -1,5 +1,11 @@
 import type { Bounds, Goal } from "./types";
-import { biomeAt } from "./biome";
+import {
+  GOAL_SPOTS,
+  MAP_EDGE_PAD,
+  clampGoalPosition,
+  goalInBounds,
+  spotXY,
+} from "./goalSpots";
 import { rng } from "./noise";
 
 export function uid(): string {
@@ -28,17 +34,23 @@ function farEnough(
   return true;
 }
 
-function inBounds(x: number, y: number, bounds: Bounds, pad = 60): boolean {
-  return (
-    x > -bounds.w / 2 + pad &&
-    x < bounds.w / 2 - pad &&
-    y > -bounds.h / 2 + pad &&
-    y < bounds.h / 2 - pad
-  );
+function pickFromSpots(
+  goals: Goal[],
+  bounds: Bounds,
+  startIndex: number,
+): { x: number; y: number } | null {
+  for (let i = 0; i < GOAL_SPOTS.length; i++) {
+    const idx = (startIndex + i) % GOAL_SPOTS.length;
+    const [fx, fy] = GOAL_SPOTS[idx];
+    const { x, y } = spotXY(fx, fy, bounds);
+    if (farEnough(x, y, goals)) return { x, y };
+  }
+  return null;
 }
 
 /**
- * Pick a land spot on the map, well-spaced from existing goals.
+ * Pick a spot on the static map, well-spaced from existing goals.
+ * Always returns coordinates inside the map image.
  */
 export function pickGoalPosition(
   originX: number,
@@ -46,6 +58,9 @@ export function pickGoalPosition(
   goals: Goal[],
   bounds: Bounds,
 ): { x: number; y: number } {
+  const fromSpots = pickFromSpots(goals, bounds, goals.length);
+  if (fromSpots) return fromSpots;
+
   const seed = (Math.floor(originX) * 73856093) ^ (Math.floor(originY) * 19349663);
   const rand = rng(seed >>> 0);
 
@@ -54,22 +69,21 @@ export function pickGoalPosition(
     const dist = NEAR_MIN + rand() * (NEAR_MAX - NEAR_MIN) + attempt * 4;
     const x = originX + Math.cos(angle) * dist;
     const y = originY + Math.sin(angle) * dist;
-    if (
-      inBounds(x, y, bounds) &&
-      biomeAt(x, y) !== "water" &&
-      farEnough(x, y, goals)
-    ) {
-      return { x, y };
+    if (goalInBounds(x, y, bounds) && farEnough(x, y, goals)) {
+      return clampGoalPosition(x, y, bounds);
     }
   }
 
-  for (let attempt = 0; attempt < 400; attempt++) {
-    const x = (rand() - 0.5) * (bounds.w - 120);
-    const y = (rand() - 0.5) * (bounds.h - 120);
-    if (biomeAt(x, y) !== "water" && farEnough(x, y, goals, MIN_GAP * 0.7)) {
-      return { x, y };
+  const spanX = bounds.w - MAP_EDGE_PAD * 2;
+  const spanY = bounds.h - MAP_EDGE_PAD * 2;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const x = (rand() - 0.5) * spanX;
+    const y = (rand() - 0.5) * spanY;
+    if (farEnough(x, y, goals, MIN_GAP * 0.7)) {
+      return clampGoalPosition(x, y, bounds);
     }
   }
 
-  return { x: originX + NEAR_MIN, y: originY };
+  const [fx, fy] = GOAL_SPOTS[goals.length % GOAL_SPOTS.length];
+  return spotXY(fx, fy, bounds);
 }

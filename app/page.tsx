@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Goal } from "@/lib/types";
 import { useGoals } from "@/hooks/useGoals";
 import MapCanvas, { type MapHandle } from "@/components/MapCanvas";
@@ -37,13 +37,24 @@ export default function Page() {
     useGoals();
   const reduced = usePrefersReducedMotion();
   const mapRef = useRef<MapHandle>(null);
+  const tourGoalIdRef = useRef<string | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [celebrate, setCelebrate] = useState<Goal | null>(null);
 
-  const recenter = () => {
-    const target = latestUnlocked ?? { x: 0, y: 0 };
-    mapRef.current?.flyTo(target.x, target.y, 1.1);
+  const cycleToNextGoal = () => {
+    const ordered = [...state.goals].sort((a, b) => a.order - b.order);
+    if (ordered.length === 0) {
+      mapRef.current?.flyTo(0, 0, 1.1);
+      return;
+    }
+    const lastIdx = tourGoalIdRef.current
+      ? ordered.findIndex((g) => g.id === tourGoalIdRef.current)
+      : -1;
+    const nextIdx = (lastIdx + 1) % ordered.length;
+    const goal = ordered[nextIdx];
+    tourGoalIdRef.current = goal.id;
+    mapRef.current?.flyTo(goal.x, goal.y, 1.1);
   };
 
   const handleAddGoal = (title: string) => {
@@ -51,6 +62,18 @@ export default function Page() {
     setSheet(null);
     if (goal) mapRef.current?.flyTo(goal.x, goal.y, 1.2);
   };
+
+  const handleSaveDraft = useCallback(
+    (data: { title: string; text: string; photo: Blob | null }) => {
+      if (sheet?.kind !== "unlockGoal") return;
+      updateGoal(sheet.goal.id, {
+        title: data.title,
+        text: data.text,
+        photo: data.photo,
+      });
+    },
+    [sheet, updateGoal],
+  );
 
   const handleUnlock = (data: { photo: Blob; text: string; title: string }) => {
     if (sheet?.kind !== "unlockGoal") return;
@@ -96,6 +119,8 @@ export default function Page() {
   };
 
   const unlockedGoals = state.goals.filter((g) => g.status === "unlocked");
+  const completedCount = unlockedGoals.length;
+  const totalCount = state.goals.length;
 
   return (
     <main className="map-frame relative h-full w-full overflow-hidden">
@@ -121,8 +146,10 @@ export default function Page() {
 
       {ready && (
         <Hud
+          completedCount={completedCount}
+          totalCount={totalCount}
           onAddExperience={() => setSheet({ kind: "addGoal" })}
-          onRecenter={recenter}
+          onRecenter={cycleToNextGoal}
           onZoomIn={() => mapRef.current?.zoomBy(1.25)}
           onZoomOut={() => mapRef.current?.zoomBy(0.8)}
         />
@@ -151,7 +178,7 @@ export default function Page() {
       <BottomSheet
         open={sheet?.kind === "addGoal"}
         onClose={() => setSheet(null)}
-        labelledBy="add-goal-title"
+        labelledBy="add-experience-title"
       >
         {sheet?.kind === "addGoal" && (
           <GoalForm
@@ -171,7 +198,12 @@ export default function Page() {
             key={sheet.goal.id}
             goal={state.goals.find((g) => g.id === sheet.goal.id) ?? sheet.goal}
             onSubmit={handleUnlock}
-            onCancel={() => setSheet(null)}
+            onSave={handleSaveDraft}
+            onClose={() => setSheet(null)}
+            onDelete={() => {
+              deleteGoal(sheet.goal.id);
+              setSheet(null);
+            }}
           />
         )}
       </BottomSheet>

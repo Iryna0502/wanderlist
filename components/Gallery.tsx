@@ -65,7 +65,7 @@ export default function Gallery({ open, goals, onClose, onSelect }: Props) {
         </div>
         {ordered.length === 0 ? (
           <p className="py-10 text-center text-sm text-ink-faint">
-            No memories yet. Complete a locked goal with a photo to unlock it.
+            No memories yet. Complete a locked experience with a photo to unlock it.
           </p>
         ) : (
           <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4">

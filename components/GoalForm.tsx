@@ -20,8 +20,8 @@ export default function GoalForm({ onSubmit, onCancel }: Props) {
       }}
       className="pb-2"
     >
-      <h2 id="add-goal-title" className="font-display text-2xl text-ink">
-        New goal
+      <h2 id="add-experience-title" className="font-display text-2xl text-ink">
+        New experience
       </h2>
       <p className="mt-1 text-sm text-ink-soft">
         Name something you want to do. It appears on the map as a locked spot until
@@ -29,7 +29,7 @@ export default function GoalForm({ onSubmit, onCancel }: Props) {
       </p>
 
       <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-ink-soft">
-        Goal title
+        Experience title
       </label>
       <input
         autoFocus
