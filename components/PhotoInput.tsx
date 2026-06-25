@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { compressImage, isHeicFile, isPhotoFile } from "@/lib/image";
 
 interface Props {
@@ -11,6 +11,7 @@ interface Props {
 
 /** File picker + drag-and-drop, with on-device downscale/compress + preview. */
 export default function PhotoInput({ onChange, initialBlob }: Props) {
+  const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -67,16 +68,8 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
 
   return (
     <div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*,.heic,.heif,image/heic,image/heif"
-        className="sr-only"
-        onChange={(e) => handleFile(e.target.files?.[0])}
-      />
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
+      <label
+        htmlFor={inputId}
         onDragOver={(e) => {
           e.preventDefault();
           setDragging(true);
@@ -87,26 +80,37 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
           setDragging(false);
           handleFile(e.dataTransfer.files?.[0]);
         }}
-        className={`relative flex min-h-[140px] w-full items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed transition ${
+        className={`relative flex min-h-[140px] w-full cursor-pointer items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed transition ${
           dragging ? "border-primary bg-primary/10" : "border-ink/25 bg-parchment"
-        }`}
+        } ${busy ? "pointer-events-none opacity-70" : ""}`}
       >
+        <input
+          ref={inputRef}
+          id={inputId}
+          type="file"
+          accept="image/*"
+          className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+          aria-label="Choose a photo from your gallery or camera"
+          onChange={(e) => {
+            void handleFile(e.target.files?.[0]);
+          }}
+        />
         {preview ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={preview}
             alt="Your photo of the moment"
-            className="h-44 w-full object-cover"
+            className="pointer-events-none h-44 w-full object-cover"
           />
         ) : (
-          <span className="px-4 text-center text-sm text-ink-soft">
+          <span className="pointer-events-none px-4 text-center text-sm text-ink-soft">
             {busy ? busyLabel : "Tap to add a photo"}
             <span className="mt-1 block text-xs text-ink-faint">
-              camera or gallery · or drag &amp; drop
+              photo library or camera · or drag &amp; drop
             </span>
           </span>
         )}
-      </button>
+      </label>
       {preview && (
         <button
           type="button"

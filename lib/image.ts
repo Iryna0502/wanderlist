@@ -23,10 +23,19 @@ export function isPhotoFile(file: File): boolean {
   return false;
 }
 
-/** Convert HEIC/HEIF to JPEG on-device; pass through everything else unchanged. */
-export async function convertHeicIfNeeded(file: File): Promise<File | Blob> {
-  if (!isHeicFile(file)) return file;
+/** Read ISO-BMFF ftyp brand — works when iOS omits filename/type. */
+async function isHeicBlob(blob: Blob): Promise<boolean> {
+  if (blob instanceof File && isHeicFile(blob)) return true;
+  if (blob.size < 12) return false;
+  const buf = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+  const ftyp = String.fromCharCode(buf[4], buf[5], buf[6], buf[7]);
+  if (ftyp !== "ftyp") return false;
+  const brand = String.fromCharCode(buf[8], buf[9], buf[10], buf[11]);
+  return /heic|heif|mif1|msf1|heix|hevc|hevx/i.test(brand);
+}
 
+/** Convert HEIC/HEIF to JPEG on-device; pass through everything else unchanged. */
+export async function convertHeicIfNeeded(file: File): Promise<Blob> {
   try {
     const { heicTo } = await import("heic-to");
     return await heicTo({
@@ -36,45 +45,9 @@ export async function convertHeicIfNeeded(file: File): Promise<File | Blob> {
     });
   } catch {
     throw new Error(
-      "Не вдалося конвертувати це HEIC-фото. Спробуй експортувати його як JPEG (Перегляд → File → Export).",
+      "Couldn't convert this iPhone photo. Try choosing a JPEG from the gallery, or export the photo as JPEG in Photos.",
     );
   }
-}
-
-export async function compressImage(file: File): Promise<Blob> {
-  if (file.size === 0) {
-    throw new Error("That file looks empty. Try choosing the photo again.");
-  }
-
-  const input = await convertHeicIfNeeded(file);
-  const bitmap = await loadBitmap(input);
-  const { width, height } = bitmap;
-
-  const scale = Math.min(1, MAX_EDGE / Math.max(width, height));
-  const w = Math.max(1, Math.round(width * scale));
-  const h = Math.max(1, Math.round(height * scale));
-
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas 2D unavailable");
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(bitmap, 0, 0, w, h);
-
-  // Release decoded bitmap memory early when supported.
-  if ("close" in bitmap) (bitmap as ImageBitmap).close?.();
-
-  const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY),
-  );
-  if (!blob) {
-    throw new Error(
-      "Couldn't save that image after resizing. Try a JPEG or PNG instead.",
-    );
-  }
-  return blob;
 }
 
 async function loadBitmap(source: Blob): Promise<ImageBitmap | HTMLImageElement> {
@@ -94,9 +67,61 @@ async function loadBitmap(source: Blob): Promise<ImageBitmap | HTMLImageElement>
     return img;
   } catch {
     throw new Error(
-      "This browser can't read that image format. Use a JPEG or PNG photo.",
+      "This browser can't read that image format. Try a JPEG or PNG photo.",
     );
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+async function compressBitmap(bitmap: ImageBitmap | HTMLImageElement): Promise<Blob> {
+  const width = "width" in bitmap ? bitmap.width : (bitmap as HTMLImageElement).naturalWidth;
+  const height = "height" in bitmap ? bitmap.height : (bitmap as HTMLImageElement).naturalHeight;
+
+  const scale = Math.min(1, MAX_EDGE / Math.max(width, height));
+  const w = Math.max(1, Math.round(width * scale));
+  const h = Math.max(1, Math.round(height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D unavailable");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bitmap, 0, 0, w, h);
+
+  if ("close" in bitmap) (bitmap as ImageBitmap).close?.();
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY),
+  );
+  if (!blob) {
+    throw new Error(
+      "Couldn't save that image after resizing. Try a JPEG or PNG instead.",
+    );
+  }
+  return blob;
+}
+
+export async function compressImage(file: File): Promise<Blob> {
+  if (file.size === 0) {
+    throw new Error("That file looks empty. Try choosing the photo again.");
+  }
+
+  // Most gallery picks (JPEG/PNG, including iOS downscaled exports) decode directly.
+  try {
+    return await compressBitmap(await loadBitmap(file));
+  } catch {
+    /* try HEIC conversion below */
+  }
+
+  if (await isHeicBlob(file)) {
+    const converted = await convertHeicIfNeeded(file);
+    return await compressBitmap(await loadBitmap(converted));
+  }
+
+  throw new Error(
+    "Couldn't read that photo. Try choosing a JPEG or PNG from your gallery.",
+  );
 }
