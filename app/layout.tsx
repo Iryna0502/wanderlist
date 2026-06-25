@@ -29,7 +29,7 @@ const body = Nunito({
 export const metadata: Metadata = {
   title: "Wanderlist — the map of your life",
   description:
-    "An endless, explorable map where goals become memories. Add a dream, complete it with a photo, and watch your world grow.",
+    "An endless, explorable map where experiences become memories. Add a dream, complete it with a photo, and watch your world grow.",
 };
 
 export const viewport: Viewport = {

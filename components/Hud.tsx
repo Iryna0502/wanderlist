@@ -1,6 +1,8 @@
 "use client";
 
 interface Props {
+  completedCount: number;
+  totalCount: number;
   onAddExperience: () => void;
   onRecenter: () => void;
   onZoomIn: () => void;
@@ -45,26 +47,69 @@ function Icon({ name }: { name: string }) {
 }
 
 export default function Hud({
+  completedCount,
+  totalCount,
   onAddExperience,
   onRecenter,
   onZoomIn,
   onZoomOut,
 }: Props) {
+  const progress =
+    totalCount > 0 ? Math.min(1, completedCount / totalCount) : 0;
+
   return (
     <div className="pointer-events-none absolute inset-0 z-20">
       {/* Top bar */}
       <div
-        className="absolute inset-x-0 top-0 p-3"
+        className="absolute inset-x-0 top-0 flex justify-center p-3"
         style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
       >
-        <div className="pointer-events-auto inline-flex items-center gap-2 rounded-2xl border border-ink/10 bg-parchment-light/90 px-3 py-2 shadow-marker backdrop-blur">
-          <span className="text-primary">
-            <Icon name="spark" />
-          </span>
-          <div>
+        <div className="pointer-events-auto flex flex-col items-center rounded-2xl border border-ink/10 bg-parchment-light/90 px-4 py-2 text-center shadow-marker backdrop-blur">
+          <div className="flex items-center gap-2">
+            <span className="text-primary">
+              <Icon name="spark" />
+            </span>
             <h1 className="font-display text-xl leading-none text-ink">Wanderlist</h1>
-            <p className="text-[11px] leading-tight text-ink-faint">A map of experiences</p>
+            <span className="text-primary">
+              <Icon name="spark" />
+            </span>
           </div>
+          <div className="mt-2 w-full min-w-[10rem]">
+            <div className="flex items-baseline justify-between gap-3 text-[11px] font-semibold tabular-nums text-ink-soft">
+              <span>
+                {completedCount}/{totalCount} experiences
+              </span>
+              <span className="font-normal text-ink-faint">
+                {totalCount > 0
+                  ? `${Math.round(progress * 100)}%`
+                  : "—"}
+              </span>
+            </div>
+            <div
+              className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-ink/10"
+              role="progressbar"
+              aria-valuenow={completedCount}
+              aria-valuemin={0}
+              aria-valuemax={Math.max(totalCount, 1)}
+              aria-label={`${completedCount} of ${totalCount} experiences completed`}
+            >
+              <div
+                className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
+                style={{ width: `${progress * 100}%` }}
+              />
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] leading-tight text-ink-faint">
+              a map of experiences by{" "}
+              <a
+                href="https://www.instagram.com/iryna_lupan/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-ink-soft underline decoration-ink/25 underline-offset-2 hover:text-primary hover:decoration-primary/40"
+              >
+                @iryna_lupan
+              </a>
+            </p>
         </div>
       </div>
 
@@ -98,7 +143,7 @@ export default function Hud({
         </button>
         <button
           onClick={onRecenter}
-          aria-label="Recenter on latest discovery"
+          aria-label="Go to next experience on the map"
           className="grid h-11 w-11 place-items-center rounded-full border border-ink/10 bg-primary text-parchment-light shadow-marker active:translate-y-px"
         >
           <Icon name="target" />

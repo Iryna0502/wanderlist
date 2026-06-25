@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Bounds, Companions, Goal, WorldState } from "@/lib/types";
 import { biomeAt } from "@/lib/biome";
 import { loadWorld, saveWorld, clearWorld } from "@/lib/storage";
-import { buildSeedWorld, MAP_LAYOUT_VERSION, relayoutWorld } from "@/lib/seed";
+import { buildSeedWorld, ensureGoalsOnMap, MAP_LAYOUT_VERSION, relayoutWorld } from "@/lib/seed";
 import { pickGoalPosition, uid } from "@/lib/spawn";
 import { WORLD } from "@/lib/world";
 
@@ -48,14 +48,21 @@ export function useGoals() {
             world.mapLayoutVersion !== MAP_LAYOUT_VERSION ||
             world.bounds.w !== bounds.w ||
             world.bounds.h !== bounds.h;
+          let needsSave = false;
           if (needsRelayout) {
             world = relayoutWorld({ ...world, bounds }, bounds);
             world.mapLayoutVersion = MAP_LAYOUT_VERSION;
-            await saveWorld(world);
+            needsSave = true;
           }
+          const fixed = ensureGoalsOnMap({ ...world, bounds }, bounds);
+          if (fixed !== world) {
+            world = fixed;
+            needsSave = true;
+          }
+          if (needsSave) await saveWorld(world);
         }
         if (!cancelled) {
-          world = { ...world, bounds: mapBounds() };
+          world = { ...world!, bounds: mapBounds() };
           lastSaved.current = world;
           setState(world);
         }

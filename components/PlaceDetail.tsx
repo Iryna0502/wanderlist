@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Goal } from "@/lib/types";
+import DeleteGoalDialog from "./DeleteGoalDialog";
 
 const BIOME_LABEL: Record<Goal["biome"], string> = {
   water: "by the water",
@@ -115,44 +116,13 @@ export default function PlaceDetail({ goal, onEdit, onDelete }: Props) {
       </div>
 
       {deleteOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
-          <button
-            type="button"
-            aria-label="Cancel delete"
-            onClick={() => setDeleteOpen(false)}
-            className="absolute inset-0 bg-ink/50 backdrop-blur-sm"
-          />
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="delete-title"
-            aria-describedby="delete-desc"
-            className="relative w-full max-w-sm animate-fade-in rounded-2xl border-2 border-ink/15 bg-parchment-light p-5 shadow-sheet"
-          >
-            <h3 id="delete-title" className="font-display text-xl text-ink">
-              Delete this memory?
-            </h3>
-            <p id="delete-desc" className="mt-2 text-sm leading-relaxed text-ink-soft">
-              &ldquo;{goal.title}&rdquo; will be removed from the map.
-            </p>
-            <div className="mt-5 flex gap-2">
-              <button
-                type="button"
-                onClick={() => setDeleteOpen(false)}
-                className="min-h-[44px] flex-1 rounded-xl border-2 border-ink/15 bg-parchment font-semibold text-ink-soft"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleDelete}
-                className="min-h-[44px] flex-1 rounded-xl bg-red-900/90 font-semibold text-parchment-light active:translate-y-px"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeleteGoalDialog
+          open={deleteOpen}
+          title="Delete this memory?"
+          description={`"${goal.title}" will be removed from the map.`}
+          onCancel={() => setDeleteOpen(false)}
+          onConfirm={handleDelete}
+        />
       )}
     </div>
   );

@@ -460,7 +460,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     <canvas
       ref={canvasRef}
       className="block h-full w-full touch-none select-none"
-      aria-label="Explorable map of your goals and memories"
+      aria-label="Explorable map of your experiences and memories"
     />
   );
 });
