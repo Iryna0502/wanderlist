@@ -22,6 +22,7 @@ import {
   lockedMarkerLayout,
   placeMarkerLayout,
 } from "@/lib/render";
+import { clampGoalPosition } from "@/lib/goalSpots";
 import { MAP_IMAGE_SRC } from "@/lib/world";
 
 /** Screen pixels of rubber-band slack allowed past the map edge while dragging. */
@@ -64,6 +65,7 @@ interface Props {
   reduced: boolean;
   onTapLocked: (goal: Goal) => void;
   onTapUnlocked: (goal: Goal) => void;
+  onMoveGoal: (id: string, x: number, y: number) => void;
 }
 
 interface PointerInfo {
@@ -72,9 +74,18 @@ interface PointerInfo {
 }
 
 const FLY_MS = 750;
+const GOAL_DRAG_THRESHOLD = 8;
+
+interface GoalDragState {
+  id: string;
+  offsetX: number;
+  offsetY: number;
+  x: number;
+  y: number;
+}
 
 const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
-  { goals, bounds, activeId, reduced, onTapLocked, onTapUnlocked },
+  { goals, bounds, activeId, reduced, onTapLocked, onTapUnlocked, onMoveGoal },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -92,6 +103,17 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
   const pinchMid = useRef<{ x: number; y: number } | null>(null);
   const downAt = useRef<{ x: number; y: number; t: number } | null>(null);
   const moved = useRef(false);
+  const pendingGoalDrag = useRef<{
+    id: string;
+    offsetX: number;
+    offsetY: number;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const goalDrag = useRef<GoalDragState | null>(null);
+  const onMoveGoalRef = useRef(onMoveGoal);
+
+  onMoveGoalRef.current = onMoveGoal;
 
   const anim = useRef<{
     from: Camera;
@@ -281,7 +303,10 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
         vp,
         time: t,
         now: Date.now(),
-        goals: goalsRef.current,
+        goals: goalsRef.current.map((g) => {
+          const drag = goalDrag.current;
+          return drag?.id === g.id ? { ...g, x: drag.x, y: drag.y } : g;
+        }),
         photos: photosRef.current,
         activeId: activeIdRef.current,
         reduced: reducedRef.current,
@@ -350,6 +375,17 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       ) {
         return { type: "unlocked" as const, goal: g };
       }
+      const titleBottom = s.y - campS * 0.85 - 8;
+      const titleTop = titleBottom - labelH;
+      const plaqueW = labelMaxW + fs * 0.9;
+      if (
+        sx >= s.x - plaqueW / 2 &&
+        sx <= s.x + plaqueW / 2 &&
+        sy >= titleTop &&
+        sy <= titleBottom + labelH
+      ) {
+        return { type: "unlocked" as const, goal: g };
+      }
       if (
         Math.abs(s.x - sx) < campS * 1.1 &&
         Math.abs(s.y - sy) < campS * 1.1
@@ -372,7 +408,25 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       if (pointers.current.size === 1) {
         downAt.current = { x: pt.x, y: pt.y, t: performance.now() };
         moved.current = false;
+        pendingGoalDrag.current = null;
+        goalDrag.current = null;
+
+        const hit = hitTest(pt.x, pt.y);
+        if (hit) {
+          const cam = camRef.current;
+          const vp = vpRef.current;
+          const world = screenToWorld(pt.x, pt.y, cam, vp);
+          pendingGoalDrag.current = {
+            id: hit.goal.id,
+            offsetX: world.x - hit.goal.x,
+            offsetY: world.y - hit.goal.y,
+            startX: pt.x,
+            startY: pt.y,
+          };
+        }
       } else if (pointers.current.size === 2) {
+        pendingGoalDrag.current = null;
+        goalDrag.current = null;
         const [a, b] = [...pointers.current.values()];
         pinchDist.current = Math.hypot(a.x - b.x, a.y - b.y);
         pinchMid.current = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -386,6 +440,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       pointers.current.set(e.pointerId, pt);
 
       if (pointers.current.size === 2) {
+        pendingGoalDrag.current = null;
+        goalDrag.current = null;
         const [a, b] = [...pointers.current.values()];
         const dist = Math.hypot(a.x - b.x, a.y - b.y);
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -401,6 +457,42 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
         return;
       }
 
+      if (pointers.current.size === 1) {
+        const pending = pendingGoalDrag.current;
+        if (pending && !goalDrag.current) {
+          if (
+            Math.hypot(pt.x - pending.startX, pt.y - pending.startY) >=
+            GOAL_DRAG_THRESHOLD
+          ) {
+            const g = goalsRef.current.find((goal) => goal.id === pending.id);
+            if (g) {
+              goalDrag.current = {
+                id: pending.id,
+                offsetX: pending.offsetX,
+                offsetY: pending.offsetY,
+                x: g.x,
+                y: g.y,
+              };
+              canvas.style.cursor = "grabbing";
+            }
+          }
+        }
+
+        if (goalDrag.current) {
+          const cam = camRef.current;
+          const vp = vpRef.current;
+          const world = screenToWorld(pt.x, pt.y, cam, vp);
+          const { x, y } = clampGoalPosition(
+            world.x - goalDrag.current.offsetX,
+            world.y - goalDrag.current.offsetY,
+            boundsRef.current,
+          );
+          goalDrag.current = { ...goalDrag.current, x, y };
+          moved.current = true;
+          return;
+        }
+      }
+
       const cam = camRef.current;
       const dx = pt.x - prev.x;
       const dy = pt.y - prev.y;
@@ -413,6 +505,14 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
     };
 
     const onUp = (e: PointerEvent) => {
+      const dragging = goalDrag.current;
+      if (dragging) {
+        onMoveGoalRef.current(dragging.id, dragging.x, dragging.y);
+        goalDrag.current = null;
+        canvas.style.cursor = "";
+      }
+      pendingGoalDrag.current = null;
+
       const wasTap =
         pointers.current.size === 1 &&
         !moved.current &&

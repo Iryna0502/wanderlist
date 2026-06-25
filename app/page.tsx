@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Goal } from "@/lib/types";
+import { biomeAt } from "@/lib/biome";
 import { useGoals } from "@/hooks/useGoals";
 import MapCanvas, { type MapHandle } from "@/components/MapCanvas";
 import Hud from "@/components/Hud";
@@ -118,6 +119,13 @@ export default function Page() {
     });
   };
 
+  const handleMoveGoal = useCallback(
+    (id: string, x: number, y: number) => {
+      updateGoal(id, { x, y, biome: biomeAt(x, y) });
+    },
+    [updateGoal],
+  );
+
   const unlockedGoals = state.goals.filter((g) => g.status === "unlocked");
   const completedCount = unlockedGoals.length;
   const totalCount = state.goals.length;
@@ -133,6 +141,7 @@ export default function Page() {
           reduced={reduced}
           onTapLocked={(goal) => setSheet({ kind: "unlockGoal", goal })}
           onTapUnlocked={(goal) => setSheet({ kind: "detail", goal })}
+          onMoveGoal={handleMoveGoal}
         />
       )}
 
