@@ -81,8 +81,21 @@ interface LegacyPlace {
   createdAt: number;
 }
 
+/**
+ * Fog-era corrupt row — title was built as `undefined` + "Ride a hot air balloon".
+ * Match title alone would delete real user goals with the same name.
+ */
+function isLegacyBalloonGoal(goal: Pick<Goal, "title" | "isSeed">): boolean {
+  if (/^undefined.*hot air balloon/i.test(goal.title)) return true;
+  if (goal.isSeed === true && /hot air balloon/i.test(goal.title)) return true;
+  return false;
+}
+
 /** v1 Place rows → unlocked goals; empty fog meta is dropped. */
-function migrateRecords(records: unknown[], meta: StoredMeta | undefined): WorldState {
+function migrateRecords(
+  records: unknown[],
+  meta: StoredMeta | undefined,
+): { state: WorldState; strippedLegacyBalloon: boolean } {
   const goals: Goal[] = [];
 
   for (const raw of records) {
@@ -105,13 +118,16 @@ function migrateRecords(records: unknown[], meta: StoredMeta | undefined): World
 
   goals.sort((a, b) => a.order - b.order);
 
-  const kept = goals.filter((g) => !/hot air balloon/i.test(g.title));
+  const kept = goals.filter((g) => !isLegacyBalloonGoal(g));
 
   return {
-    goals: kept,
-    nextOrder: meta?.nextOrder ?? kept.length,
-    bounds: WORLD,
-    mapLayoutVersion: meta?.mapLayoutVersion,
+    state: {
+      goals: kept,
+      nextOrder: meta?.nextOrder ?? kept.length,
+      bounds: WORLD,
+      mapLayoutVersion: meta?.mapLayoutVersion,
+    },
+    strippedLegacyBalloon: kept.length < goals.length,
   };
 }
 
@@ -127,11 +143,14 @@ export async function loadWorld(): Promise<WorldState | null> {
       return migrateRecords(records, meta);
     });
 
-    if (world && (await needsPersistedMigration(db, world))) {
-      await saveWorld(world);
+    if (
+      world &&
+      (world.strippedLegacyBalloon || (await needsPersistedMigration(db, world.state)))
+    ) {
+      await saveWorld(world.state);
     }
 
-    return world;
+    return world?.state ?? null;
   } finally {
     db.close();
   }
