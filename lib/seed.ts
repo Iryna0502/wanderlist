@@ -1,7 +1,6 @@
 import type { Bounds, Goal, WorldState } from "./types";
 import { biomeAt } from "./biome";
 import { GOAL_SPOTS, goalInBounds, spotXY } from "./goalSpots";
-import { uid } from "./spawn";
 
 /** Bump when the map art or spot layout changes — triggers a one-time relayout. */
 export const MAP_LAYOUT_VERSION = 3;
@@ -35,6 +34,7 @@ export function ensureGoalsOnMap(world: WorldState, bounds: Bounds): WorldState 
   return changed ? { ...world, goals, bounds } : world;
 }
 
+/** @deprecated Unused — kept as offline fallback if demo photos return. */
 function makeSeedPhoto(a: string, b: string, c: string): Promise<Blob | null> {
   const canvas = document.createElement("canvas");
   canvas.width = 480;
@@ -71,42 +71,22 @@ function makeSeedPhoto(a: string, b: string, c: string): Promise<Blob | null> {
   );
 }
 
-/** First visit: one locked demo goal + one unlocked demo goal — no empty fog slots. */
-export async function buildSeedWorld(bounds: Bounds): Promise<WorldState> {
-  const unlockedPos = spotXY(GOAL_SPOTS[0][0], GOAL_SPOTS[0][1], bounds);
-  const lockedPos = spotXY(GOAL_SPOTS[8][0], GOAL_SPOTS[8][1], bounds);
-  const photo = await makeSeedPhoto("#6a9aa0", "#a9d0cb", "#eef3e0");
-  const now = Date.now();
+const SEED_PHOTO_URL = "/seed/sunset-bike-ride.jpg";
 
-  const goals: Goal[] = [
-    {
-      id: uid(),
-      x: unlockedPos.x,
-      y: unlockedPos.y,
-      title: "Sunset bike ride",
-      text: "Golden hour on the coastal path — worth every pedal.",
-      companions: "friends",
-      biome: biomeAt(unlockedPos.x, unlockedPos.y),
-      photo,
-      status: "unlocked",
-      order: 0,
-      createdAt: now - 86400000,
-      unlockedAt: now - 86400000,
-    },
-    {
-      id: uid(),
-      x: lockedPos.x,
-      y: lockedPos.y,
-      title: "навчитися серфити",
-      text: "",
-      companions: "alone",
-      biome: biomeAt(lockedPos.x, lockedPos.y),
-      photo: null,
-      status: "locked",
-      order: 1,
-      createdAt: now,
-    },
-  ];
+/** @deprecated Unused — kept as offline fallback if demo photos return. */
+async function loadSeedPhoto(): Promise<Blob | null> {
+  try {
+    const res = await fetch(SEED_PHOTO_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (!blob.size) throw new Error("empty blob");
+    return blob;
+  } catch {
+    return makeSeedPhoto("#6a9aa0", "#a9d0cb", "#eef3e0");
+  }
+}
 
-  return { goals, nextOrder: 2, bounds };
+/** First visit: empty map — the user adds their own first experience. */
+export function buildSeedWorld(bounds: Bounds): WorldState {
+  return { goals: [], nextOrder: 0, bounds };
 }

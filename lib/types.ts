@@ -24,6 +24,8 @@ export interface Goal {
   order: number;
   createdAt: number;
   unlockedAt?: number;
+  /** Demo marker shown on first visit — removed when the user adds a real goal. */
+  isSeed?: boolean;
 }
 
 /** The finite extent of the map, in world units, centered on the origin. */

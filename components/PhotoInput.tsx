@@ -15,6 +15,7 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [heicUpload, setHeicUpload] = useState(false);
   const [busyLabel, setBusyLabel] = useState("Processing your photo…");
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,9 +41,11 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
         return;
       }
       setError(null);
+      const heic = isHeicFile(file);
+      setHeicUpload(heic);
       setBusy(true);
       setBusyLabel(
-        isHeicFile(file) ? "Converting iPhone photo…" : "Processing your photo…",
+        heic ? "Converting iPhone photo…" : "Processing your photo…",
       );
       try {
         const blob = await compressImage(file);
@@ -60,6 +63,7 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
         onChange(null);
       } finally {
         setBusy(false);
+        setHeicUpload(false);
         if (inputRef.current) inputRef.current.value = "";
       }
     },
@@ -103,11 +107,25 @@ export default function PhotoInput({ onChange, initialBlob }: Props) {
             className="pointer-events-none h-44 w-full object-cover"
           />
         ) : (
-          <span className="pointer-events-none px-4 text-center text-sm text-ink-soft">
-            {busy ? busyLabel : "Tap to add a photo"}
-            <span className="mt-1 block text-xs text-ink-faint">
-              photo library or camera · or drag &amp; drop
-            </span>
+          <span className="pointer-events-none flex flex-col items-center gap-2 px-4 text-center text-sm text-ink-soft">
+            {busy && heicUpload && (
+              <span
+                className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-ink/20 border-t-primary"
+                aria-hidden
+              />
+            )}
+            <span>{busy ? busyLabel : "Tap to add a photo"}</span>
+            {busy && heicUpload ? (
+              <span className="text-xs text-ink-faint">
+                Large photos can take up to a minute.
+              </span>
+            ) : (
+              !busy && (
+                <span className="text-xs text-ink-faint">
+                  photo library or camera · or drag &amp; drop
+                </span>
+              )
+            )}
           </span>
         )}
       </label>

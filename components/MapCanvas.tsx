@@ -74,9 +74,10 @@ interface PointerInfo {
 }
 
 const FLY_MS = 750;
-const GOAL_DRAG_THRESHOLD = 8;
+/** Screen px — separates tap from drag/pan intent (touch + mouse). */
+const TAP_MOVEMENT_THRESHOLD = 8;
+const GOAL_DRAG_THRESHOLD = TAP_MOVEMENT_THRESHOLD;
 const GOAL_LONG_PRESS_MS = 480;
-const GOAL_LONG_PRESS_SLOP = 14;
 const TOUCH_HIT_PAD = 1.6;
 
 interface GoalDragState {
@@ -85,6 +86,8 @@ interface GoalDragState {
   offsetY: number;
   x: number;
   y: number;
+  originX: number;
+  originY: number;
 }
 
 interface PendingGoalDrag {
@@ -431,6 +434,24 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       pendingGoalDrag.current = null;
     };
 
+    const goalDragScreenDelta = (drag: GoalDragState): number => {
+      const cam = camRef.current;
+      const vp = vpRef.current;
+      const start = worldToScreen(drag.originX, drag.originY, cam, vp);
+      const end = worldToScreen(drag.x, drag.y, cam, vp);
+      return Math.hypot(end.x - start.x, end.y - start.y);
+    };
+
+    const commitGoalDrag = (force = false) => {
+      const dragging = goalDrag.current;
+      if (!dragging) return;
+      if (force || goalDragScreenDelta(dragging) >= TAP_MOVEMENT_THRESHOLD) {
+        onMoveGoalRef.current(dragging.id, dragging.x, dragging.y);
+      }
+      goalDrag.current = null;
+      canvas.style.cursor = "";
+    };
+
     const beginGoalDrag = (pending: PendingGoalDrag) => {
       const g = goalsRef.current.find((goal) => goal.id === pending.id);
       if (!g) return false;
@@ -440,11 +461,18 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
         offsetY: pending.offsetY,
         x: g.x,
         y: g.y,
+        originX: g.x,
+        originY: g.y,
       };
       canvas.style.cursor = "grabbing";
       navigator.vibrate?.(12);
-      moved.current = true;
       return true;
+    };
+
+    const startPinch = () => {
+      const [a, b] = [...pointers.current.values()];
+      pinchDist.current = Math.hypot(a.x - b.x, a.y - b.y);
+      pinchMid.current = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     };
 
     const onDown = (e: PointerEvent) => {
@@ -483,10 +511,8 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
         }
       } else if (pointers.current.size === 2) {
         clearPendingGoalDrag();
-        goalDrag.current = null;
-        const [a, b] = [...pointers.current.values()];
-        pinchDist.current = Math.hypot(a.x - b.x, a.y - b.y);
-        pinchMid.current = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        commitGoalDrag(true);
+        startPinch();
       }
     };
 
@@ -498,7 +524,7 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
 
       if (pointers.current.size === 2) {
         clearPendingGoalDrag();
-        goalDrag.current = null;
+        commitGoalDrag(true);
         const [a, b] = [...pointers.current.values()];
         const dist = Math.hypot(a.x - b.x, a.y - b.y);
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -519,13 +545,14 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
         if (pending && !goalDrag.current) {
           const slop = Math.hypot(pt.x - pending.startX, pt.y - pending.startY);
           if (pending.useLongPress) {
-            if (slop > GOAL_LONG_PRESS_SLOP) {
+            if (slop > TAP_MOVEMENT_THRESHOLD) {
               clearPendingGoalDrag();
             } else {
               return;
             }
           } else if (slop >= GOAL_DRAG_THRESHOLD) {
             beginGoalDrag(pending);
+            clearPendingGoalDrag();
           } else {
             return;
           }
@@ -541,7 +568,9 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
             boundsRef.current,
           );
           goalDrag.current = { ...goalDrag.current, x, y };
-          moved.current = true;
+          if (goalDragScreenDelta(goalDrag.current) >= TAP_MOVEMENT_THRESHOLD) {
+            moved.current = true;
+          }
           return;
         }
       }
@@ -553,17 +582,12 @@ const MapCanvas = forwardRef<MapHandle, Props>(function MapCanvas(
       cam.y -= dy / cam.zoom;
       if (downAt.current) {
         const md = Math.hypot(pt.x - downAt.current.x, pt.y - downAt.current.y);
-        if (md > 6) moved.current = true;
+        if (md > TAP_MOVEMENT_THRESHOLD) moved.current = true;
       }
     };
 
     const onUp = (e: PointerEvent) => {
-      const dragging = goalDrag.current;
-      if (dragging) {
-        onMoveGoalRef.current(dragging.id, dragging.x, dragging.y);
-        goalDrag.current = null;
-        canvas.style.cursor = "";
-      }
+      commitGoalDrag();
       clearPendingGoalDrag();
 
       const wasTap =

@@ -13,6 +13,7 @@ import EditGoalForm from "@/components/EditGoalForm";
 import PlaceDetail from "@/components/PlaceDetail";
 import Gallery from "@/components/Gallery";
 import Celebration from "@/components/Celebration";
+import OnboardingHint from "@/components/OnboardingHint";
 
 type Sheet =
   | { kind: "addGoal" }
@@ -34,7 +35,7 @@ function usePrefersReducedMotion() {
 }
 
 export default function Page() {
-  const { state, ready, addGoal, unlockGoal, updateGoal, deleteGoal, latestUnlocked } =
+  const { state, ready, storageBlocked, saveError, addGoal, unlockGoal, updateGoal, deleteGoal, latestUnlocked } =
     useGoals();
   const reduced = usePrefersReducedMotion();
   const mapRef = useRef<MapHandle>(null);
@@ -65,12 +66,11 @@ export default function Page() {
   };
 
   const handleSaveDraft = useCallback(
-    (data: { title: string; text: string; photo: Blob | null }) => {
+    (data: { title: string; text: string }) => {
       if (sheet?.kind !== "unlockGoal") return;
       updateGoal(sheet.goal.id, {
         title: data.title,
         text: data.text,
-        photo: data.photo,
       });
     },
     [sheet, updateGoal],
@@ -164,6 +164,23 @@ export default function Page() {
         />
       )}
 
+      {ready && (storageBlocked || saveError) && (
+        <div
+          className="pointer-events-none absolute inset-x-0 z-30 flex justify-center px-4"
+          style={{ top: "max(5.75rem, calc(env(safe-area-inset-top) + 5rem))" }}
+          role="status"
+          aria-live="polite"
+        >
+          <p className="max-w-md rounded-xl border border-primary-deep/25 bg-parchment-light/95 px-4 py-2 text-center text-sm font-semibold text-primary-deep shadow-marker backdrop-blur-sm">
+            {storageBlocked
+              ? "Changes aren't being saved — your map may not persist."
+              : saveError}
+          </p>
+        </div>
+      )}
+
+      {ready && state.goals.length === 0 && <OnboardingHint />}
+
       <Gallery
         open={galleryOpen}
         goals={unlockedGoals}
@@ -249,6 +266,7 @@ export default function Page() {
           return (
             <PlaceDetail
               goal={goal}
+              goals={state.goals}
               onEdit={() => setSheet({ kind: "edit", goal })}
               onDelete={() => {
                 deleteGoal(goal.id);
