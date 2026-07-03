@@ -12,6 +12,9 @@ function mapBounds(): Bounds {
   return WORLD;
 }
 
+const PERSISTENCE_WARNING =
+  "Changes aren't being saved — your map may not persist.";
+
 export interface AddGoalInput {
   title: string;
 }
@@ -31,14 +34,17 @@ export function useGoals() {
     bounds: WORLD,
   });
   const [ready, setReady] = useState(false);
+  const [storageBlocked, setStorageBlocked] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const lastSaved = useRef<WorldState | null>(null);
   const hydrated = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      let world: WorldState | null = null;
       try {
-        let world = await loadWorld();
+        world = await loadWorld();
         if (!world) {
           world = buildSeedWorld(mapBounds());
           world.mapLayoutVersion = MAP_LAYOUT_VERSION;
@@ -66,10 +72,19 @@ export function useGoals() {
           world = { ...world!, bounds: mapBounds() };
           lastSaved.current = world;
           hydrated.current = true;
+          setStorageBlocked(false);
+          setSaveError(null);
           setState(world);
         }
       } catch (err) {
         console.error("Failed to load world", err);
+        if (!cancelled) {
+          const fallback = world ?? buildSeedWorld(mapBounds());
+          fallback.mapLayoutVersion = MAP_LAYOUT_VERSION;
+          setState({ ...fallback, bounds: mapBounds() });
+          setStorageBlocked(true);
+          setSaveError(null);
+        }
       } finally {
         if (!cancelled) setReady(true);
       }
@@ -82,8 +97,23 @@ export function useGoals() {
   useEffect(() => {
     if (!ready || !hydrated.current) return;
     if (lastSaved.current === state) return;
-    lastSaved.current = state;
-    saveWorld(state).catch((err) => console.error("Failed to save world", err));
+
+    const snapshot = state;
+    let cancelled = false;
+    saveWorld(snapshot)
+      .then(() => {
+        if (cancelled) return;
+        lastSaved.current = snapshot;
+        setSaveError(null);
+      })
+      .catch((err) => {
+        console.error("Failed to save world", err);
+        if (!cancelled) setSaveError(PERSISTENCE_WARNING);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [state, ready]);
 
   /** Create a locked goal with a title — no photo yet. */
@@ -166,13 +196,21 @@ export function useGoals() {
   }, []);
 
   const reset = useCallback(async () => {
-    await clearWorld();
-    const world = buildSeedWorld(mapBounds());
-    world.mapLayoutVersion = MAP_LAYOUT_VERSION;
-    await saveWorld(world);
-    lastSaved.current = world;
-    hydrated.current = true;
-    setState(world);
+    try {
+      await clearWorld();
+      const world = buildSeedWorld(mapBounds());
+      world.mapLayoutVersion = MAP_LAYOUT_VERSION;
+      await saveWorld(world);
+      lastSaved.current = world;
+      hydrated.current = true;
+      setStorageBlocked(false);
+      setSaveError(null);
+      setState(world);
+    } catch (err) {
+      console.error("Failed to reset world", err);
+      setStorageBlocked(true);
+      setSaveError(PERSISTENCE_WARNING);
+    }
   }, []);
 
   const latestUnlocked =
@@ -182,6 +220,8 @@ export function useGoals() {
   return {
     state,
     ready,
+    storageBlocked,
+    saveError,
     addGoal,
     unlockGoal,
     updateGoal,

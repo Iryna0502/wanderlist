@@ -8,14 +8,16 @@ import PhotoInput from "./PhotoInput";
 interface Props {
   goal: Goal;
   onSubmit: (data: { photo: Blob; text: string; title: string }) => void;
-  onSave: (data: { title: string; text: string; photo: Blob | null }) => void;
+  onSave: (data: { title: string; text: string }) => void;
   onClose: () => void;
   onDelete: () => void;
 }
 
 export default function UnlockForm({ goal, onSubmit, onSave, onClose, onDelete }: Props) {
   const [title, setTitle] = useState(goal.title);
-  const [photo, setPhoto] = useState<Blob | null>(goal.photo);
+  const [photo, setPhoto] = useState<Blob | null>(
+    goal.status === "locked" ? null : goal.photo,
+  );
   const [text, setText] = useState(goal.text);
   const [error, setError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -23,18 +25,17 @@ export default function UnlockForm({ goal, onSubmit, onSave, onClose, onDelete }
   useEffect(() => {
     setTitle(goal.title);
     setText(goal.text);
-    setPhoto(goal.photo);
+    setPhoto(goal.status === "locked" ? null : goal.photo);
     setDeleteOpen(false);
-  }, [goal.id]);
+  }, [goal.id, goal.status, goal.photo, goal.title, goal.text]);
 
-  const draft = () => ({
+  const draftText = () => ({
     title: title.trim(),
     text: text.trim(),
-    photo,
   });
 
   const saveDraft = () => {
-    const data = draft();
+    const data = draftText();
     if (!data.title) {
       setError("Give your experience a title.");
       return false;
@@ -45,19 +46,13 @@ export default function UnlockForm({ goal, onSubmit, onSave, onClose, onDelete }
   };
 
   useEffect(() => {
-    const data = draft();
+    const data = draftText();
     if (!data.title) return;
-    if (
-      data.title === goal.title &&
-      data.text === goal.text &&
-      data.photo === goal.photo
-    ) {
-      return;
-    }
+    if (data.title === goal.title && data.text === goal.text) return;
 
     const timer = window.setTimeout(() => onSave(data), 400);
     return () => window.clearTimeout(timer);
-  }, [title, text, photo, goal.title, goal.text, goal.photo, onSave]);
+  }, [title, text, goal.title, goal.text, onSave]);
 
   return (
     <form
@@ -98,7 +93,11 @@ export default function UnlockForm({ goal, onSubmit, onSave, onClose, onDelete }
         Proof photo
       </label>
       <div className="mt-1">
-        <PhotoInput key={goal.id} initialBlob={goal.photo} onChange={setPhoto} />
+        <PhotoInput
+          key={goal.id}
+          initialBlob={goal.status === "locked" ? null : goal.photo}
+          onChange={setPhoto}
+        />
       </div>
 
       <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-ink-soft">

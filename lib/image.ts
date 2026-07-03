@@ -4,7 +4,43 @@
  */
 const MAX_EDGE = 900;
 const JPEG_QUALITY = 0.82;
-const HEIC_JPEG_QUALITY = 0.9;
+
+const HEIC_TIMEOUT_MS = 60_000;
+const HEIC_TIMEOUT_MSG =
+  "This photo took too long to convert — try a smaller image or export as JPEG from Photos.";
+const HEIC_CONVERT_MSG =
+  "Couldn't convert this iPhone photo. Try choosing a JPEG from the gallery, or export the photo as JPEG in Photos.";
+
+/** Reject camera originals before decode — tune if real-world uploads hit this often. */
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+const MAX_UPLOAD_MB = MAX_UPLOAD_BYTES / (1024 * 1024);
+
+export function maxUploadSizeError(): string {
+  return `That photo's too large — try one under ${MAX_UPLOAD_MB} MB.`;
+}
+
+function assertUploadSize(file: File): void {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new Error(maxUploadSizeError());
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
 
 /** Detect HEIC/HEIF by MIME and extension — iPhone files often omit `file.type`. */
 export function isHeicFile(file: File): boolean {
@@ -34,19 +70,26 @@ async function isHeicBlob(blob: Blob): Promise<boolean> {
   return /heic|heif|mif1|msf1|heix|hevc|hevx/i.test(brand);
 }
 
-/** Convert HEIC/HEIF to JPEG on-device; pass through everything else unchanged. */
-export async function convertHeicIfNeeded(file: File): Promise<Blob> {
+/** HEIC → resized ImageBitmap via heic-to worker + createImageBitmap resize options. */
+async function convertHeicToBitmap(file: File): Promise<ImageBitmap> {
   try {
     const { heicTo } = await import("heic-to");
-    return await heicTo({
-      blob: file,
-      type: "image/jpeg",
-      quality: HEIC_JPEG_QUALITY,
-    });
-  } catch {
-    throw new Error(
-      "Couldn't convert this iPhone photo. Try choosing a JPEG from the gallery, or export the photo as JPEG in Photos.",
+    return await withTimeout(
+      heicTo({
+        blob: file,
+        type: "bitmap",
+        options: {
+          resizeWidth: MAX_EDGE,
+          resizeHeight: MAX_EDGE,
+          resizeQuality: "high",
+        },
+      }),
+      HEIC_TIMEOUT_MS,
+      HEIC_TIMEOUT_MSG,
     );
+  } catch (err) {
+    if (err instanceof Error && err.message === HEIC_TIMEOUT_MSG) throw err;
+    throw new Error(HEIC_CONVERT_MSG);
   }
 }
 
@@ -108,20 +151,19 @@ export async function compressImage(file: File): Promise<Blob> {
   if (file.size === 0) {
     throw new Error("That file looks empty. Try choosing the photo again.");
   }
+  assertUploadSize(file);
+
+  if (await isHeicBlob(file)) {
+    const bitmap = await convertHeicToBitmap(file);
+    return await compressBitmap(bitmap);
+  }
 
   // Most gallery picks (JPEG/PNG, including iOS downscaled exports) decode directly.
   try {
     return await compressBitmap(await loadBitmap(file));
   } catch {
-    /* try HEIC conversion below */
+    throw new Error(
+      "Couldn't read that photo. Try choosing a JPEG or PNG from your gallery.",
+    );
   }
-
-  if (await isHeicBlob(file)) {
-    const converted = await convertHeicIfNeeded(file);
-    return await compressBitmap(await loadBitmap(converted));
-  }
-
-  throw new Error(
-    "Couldn't read that photo. Try choosing a JPEG or PNG from your gallery.",
-  );
 }
