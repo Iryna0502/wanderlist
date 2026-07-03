@@ -13,6 +13,7 @@ import EditGoalForm from "@/components/EditGoalForm";
 import PlaceDetail from "@/components/PlaceDetail";
 import Gallery from "@/components/Gallery";
 import Celebration from "@/components/Celebration";
+import OnboardingHint from "@/components/OnboardingHint";
 
 type Sheet =
   | { kind: "addGoal" }
@@ -164,6 +165,8 @@ export default function Page() {
         />
       )}
 
+      {ready && state.goals.length === 0 && <OnboardingHint />}
+
       <Gallery
         open={galleryOpen}
         goals={unlockedGoals}
@@ -249,6 +252,7 @@ export default function Page() {
           return (
             <PlaceDetail
               goal={goal}
+              goals={state.goals}
               onEdit={() => setSheet({ kind: "edit", goal })}
               onDelete={() => {
                 deleteGoal(goal.id);

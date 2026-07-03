@@ -32,6 +32,7 @@ export function useGoals() {
   });
   const [ready, setReady] = useState(false);
   const lastSaved = useRef<WorldState | null>(null);
+  const hydrated = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,7 +40,7 @@ export function useGoals() {
       try {
         let world = await loadWorld();
         if (!world) {
-          world = await buildSeedWorld(mapBounds());
+          world = buildSeedWorld(mapBounds());
           world.mapLayoutVersion = MAP_LAYOUT_VERSION;
           await saveWorld(world);
         } else {
@@ -64,6 +65,7 @@ export function useGoals() {
         if (!cancelled) {
           world = { ...world!, bounds: mapBounds() };
           lastSaved.current = world;
+          hydrated.current = true;
           setState(world);
         }
       } catch (err) {
@@ -78,7 +80,7 @@ export function useGoals() {
   }, []);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !hydrated.current) return;
     if (lastSaved.current === state) return;
     lastSaved.current = state;
     saveWorld(state).catch((err) => console.error("Failed to save world", err));
@@ -91,13 +93,14 @@ export function useGoals() {
 
     let created: Goal | null = null;
     setState((prev) => {
-      const latest = prev.goals.reduce<Goal | null>(
+      const withoutSeed = prev.goals.filter((g) => !g.isSeed);
+      const latest = withoutSeed.reduce<Goal | null>(
         (best, g) => (!best || g.order >= best.order ? g : best),
         null,
       );
       const originX = latest?.x ?? 0;
       const originY = latest?.y ?? 0;
-      const { x, y } = pickGoalPosition(originX, originY, prev.goals, prev.bounds);
+      const { x, y } = pickGoalPosition(originX, originY, withoutSeed, prev.bounds);
 
       const goal: Goal = {
         id: uid(),
@@ -115,7 +118,7 @@ export function useGoals() {
       created = goal;
       return {
         ...prev,
-        goals: [...prev.goals, goal],
+        goals: [...withoutSeed, goal],
         nextOrder: prev.nextOrder + 1,
       };
     });
@@ -164,10 +167,11 @@ export function useGoals() {
 
   const reset = useCallback(async () => {
     await clearWorld();
-    const world = await buildSeedWorld(mapBounds());
+    const world = buildSeedWorld(mapBounds());
     world.mapLayoutVersion = MAP_LAYOUT_VERSION;
     await saveWorld(world);
     lastSaved.current = world;
+    hydrated.current = true;
     setState(world);
   }, []);
 

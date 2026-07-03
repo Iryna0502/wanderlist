@@ -14,11 +14,18 @@ const BIOME_LABEL: Record<Goal["biome"], string> = {
 
 interface Props {
   goal: Goal;
+  goals: Goal[];
   onEdit?: () => void;
   onDelete?: () => void;
 }
 
-export default function PlaceDetail({ goal, onEdit, onDelete }: Props) {
+function goalDisplayNumber(goal: Goal, goals: Goal[]): number {
+  const ordered = [...goals].sort((a, b) => a.order - b.order);
+  const idx = ordered.findIndex((g) => g.id === goal.id);
+  return idx >= 0 ? idx + 1 : 1;
+}
+
+export default function PlaceDetail({ goal, goals, onEdit, onDelete }: Props) {
   const [url, setUrl] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -69,7 +76,7 @@ export default function PlaceDetail({ goal, onEdit, onDelete }: Props) {
           {goal.title}
         </h2>
         <span className="shrink-0 rounded-full bg-primary/15 px-3 py-1 text-xs font-semibold text-primary-deep">
-          #{goal.order + 1}
+          #{goalDisplayNumber(goal, goals)}
         </span>
       </div>
 
